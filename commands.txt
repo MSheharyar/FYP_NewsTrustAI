@@ -1,0 +1,31 @@
+AWS CREDENTIALS:
+EMAIL: sheharyarghori3@gmail.com
+Password: appleiphone6S@11
+
+
+OPEN cmd in D:\FYP\FYP_NewsTrust_AI: 
+ssh -i .\my-key.pem ubuntu@3.107.3.81
+
+scp ubuntu@13.239.65.21:/home/ubuntu/newstrust-backend/global_news_db.json .
+
+cd ~/newstrust-backend
+source .venv/bin/activate
+
+cd ~/newstrust-backend/config
+cd ~/newstrust-backend/db
+cd ~/newstrust-backend/routes
+cd ~/newstrust-backend/services
+cd ~/newstrust-backend/utils
+
+nano main.py
+
+python3 update_db.py
+
+Ctrl+X for commit, hit Y then ENTER
+
+sudo systemctl restart newstrust
+sudo systemctl status newstrust --no-pager
+
+
+
+
