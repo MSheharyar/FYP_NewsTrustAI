@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "936316195806",
+    "project_id": "newstrust-fall",
+    "storage_bucket": "newstrust-fall.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:936316195806:android:807efa159f810ef113034f",
+        "android_client_info": {
+          "package_name": "com.example.fyp_proj"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCw_h_PbO8dcc74rDjbP-BekSgzMmXmHF8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

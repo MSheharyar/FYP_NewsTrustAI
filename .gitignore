@@ -4,4 +4,14 @@ __pycache__/
 *.pem
 *.ppk
 *.safetensors
-*.json
+
+# Generated data (avoid committing constantly-changing DB dumps)
+**/global_news_db.json
+
+# Flutter / Dart generated
+frontend/newstrustai/.dart_tool/
+frontend/newstrustai/build/
+frontend/newstrustai/.git_bak/
+
+# Python model artifacts (should not be committed; use Git LFS or download at deploy time)
+backend/news_bert_model/
