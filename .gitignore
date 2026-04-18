@@ -5,6 +5,9 @@ __pycache__/
 *.ppk
 *.safetensors
 
+# Local notes / secrets (never commit)
+commands.txt
+
 # Generated data (avoid committing constantly-changing DB dumps)
 **/global_news_db.json
 
