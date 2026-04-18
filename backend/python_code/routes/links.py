@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, HttpUrl
 from typing import Tuple
 import requests
 from bs4 import BeautifulSoup
@@ -8,6 +9,9 @@ from utils.net import get_domain, domain_in_set
 from config.settings import MAIN_SOURCE_DOMAINS
 
 router = APIRouter()
+
+class AnalyzeLinkRequest(BaseModel):
+    url: HttpUrl
 
 def fetch_article_text(url: str) -> Tuple[str, str]:
     headers = {
@@ -53,19 +57,13 @@ def fetch_article_text(url: str) -> Tuple[str, str]:
 
 
 @router.post("/verify-link")
-def verify_link(payload: dict = Body(...)):
+def verify_link(payload: AnalyzeLinkRequest):
     return analyze_link(payload)
 
 
 @router.post("/analyze-link")
-def analyze_link(payload: dict = Body(...)):
-    url = (payload.get("url") or "").strip()
-
-    if not url:
-        raise HTTPException(status_code=400, detail="URL is empty.")
-
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise HTTPException(status_code=400, detail="Invalid URL.")
+def analyze_link(payload: AnalyzeLinkRequest):
+    url = str(payload.url).strip()
 
     domain = get_domain(url)
     is_main_source = domain_in_set(domain, MAIN_SOURCE_DOMAINS)
@@ -79,6 +77,12 @@ def analyze_link(payload: dict = Body(...)):
         extracted_text = ((title or "") + "\n\n" + (text or "")).strip()
         if len(extracted_text) < 80:
             extraction_error = "Could not extract enough article text."
+    except requests.exceptions.Timeout:
+        extraction_error = "Timed out while fetching the article."
+    except requests.exceptions.ConnectionError:
+        extraction_error = "Failed to connect to the article host."
+    except requests.exceptions.HTTPError as e:
+        extraction_error = str(e)
     except Exception as e:
         extraction_error = str(e)
 
@@ -118,6 +122,9 @@ def analyze_link(payload: dict = Body(...)):
 
     # Normal case: verify extracted content
     result = hybrid_decision(extracted_text, source_domain=domain)
+    if isinstance(result, dict) and result.get("error") is True:
+        # hybrid_decision should not error here, but keep behavior predictable.
+        raise HTTPException(status_code=400, detail=str(result.get("message") or "Unable to verify link text"))
     result.update({
         "link_url": url,
         "link_title": title or "",

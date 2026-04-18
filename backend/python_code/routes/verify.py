@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional
 import numpy as np
 
 # Import your existing services
@@ -7,6 +9,10 @@ from services.bert import bert_predict
 from services.lime_explainer import get_fake_highlights
 
 router = APIRouter()
+
+class VerifyTextRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    query: Optional[str] = None
 
 def lime_predict_wrapper(texts: list) -> np.ndarray:
     """
@@ -32,12 +38,18 @@ def lime_predict_wrapper(texts: list) -> np.ndarray:
     return np.array(probs)
 
 @router.post("/verify-text")
-def verify_text(payload: dict = Body(...)):
-    text = (payload.get("text") or "").strip()
-    query = (payload.get("query") or "").strip()
+def verify_text(payload: VerifyTextRequest):
+    text = (payload.text or "").strip()
+    query = (payload.query or "").strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is empty.")
     
     # 1. Get the standard heuristic/hybrid decision
     result = hybrid_decision(text)
+    if isinstance(result, dict) and result.get("error") is True:
+        # Align with Flutter's error handling.
+        raise HTTPException(status_code=400, detail=str(result.get("message") or "Invalid input"))
     
     # 2. Get the BERT ML prediction
     bert_res = bert_predict(text)
@@ -68,4 +80,8 @@ def verify_text(payload: dict = Body(...)):
             result["highlighted_words"] = []
             result["explanation_text"] = ""
 
-    return result
+        result.setdefault("error", False)
+        return result
+
+    # Defensive: hybrid_decision should return dict; if not, fail clearly.
+    raise HTTPException(status_code=500, detail="Unexpected verification response.")
