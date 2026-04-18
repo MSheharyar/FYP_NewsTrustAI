@@ -4,6 +4,7 @@ __pycache__/
 *.pem
 *.ppk
 *.safetensors
+*.log
 
 # Local notes / secrets (never commit)
 commands.txt

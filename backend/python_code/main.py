@@ -10,6 +10,19 @@ from routes.debug import router as debug_router
 
 app = FastAPI(title="NewsTrustAI Backend", version="3.0")
 
+@app.on_event("startup")
+def _startup_warmup():
+    """
+    Load heavy ML resources once (if available) so requests don't pay the cost.
+    Falls back gracefully when torch/transformers or model files aren't present.
+    """
+    try:
+        from services.bert import warmup_bert
+        warmup_bert()
+    except Exception:
+        # Keep backend usable even if warmup fails.
+        pass
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     detail = exc.detail
