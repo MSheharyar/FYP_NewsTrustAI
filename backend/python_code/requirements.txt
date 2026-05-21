@@ -1,0 +1,47 @@
+# NewsTrustAI backend dependencies
+# Install with: pip install -r requirements.txt
+#
+# For GPU support replace the torch line with the appropriate CUDA wheel:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+
+# ML / NLP
+torch>=2.0.0
+transformers>=4.38.0
+sentence-transformers>=2.6.0
+numpy>=1.24.0
+
+# Fuzzy matching
+rapidfuzz>=3.6.0
+
+# BM25 ranked retrieval (replaces boolean keyword filter in DB search)
+rank-bm25>=0.2.2
+
+# spaCy NER — optional but recommended for accurate entity extraction.
+# After installing, download the model:  python -m spacy download en_core_web_sm
+# Falls back to regex/vocabulary NER if not installed.
+spacy>=3.7.0
+
+# Explainability (both optional — graceful fallback if absent)
+shap>=0.44.0
+lime>=0.2.0.1
+scikit-learn>=1.4.0
+
+# HTTP + scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+urllib3>=2.0.0
+
+# Firebase Admin SDK (token verification for auth middleware)
+firebase-admin>=6.0.0
+
+# Rate limiting (per-IP request throttle on /verify-text)
+slowapi>=0.1.9
+
+# Gemini API (AI chatbot) — uses the new google-genai SDK
+google-genai>=1.0.0

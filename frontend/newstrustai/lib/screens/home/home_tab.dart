@@ -151,7 +151,9 @@ class _HomeTabState extends State<HomeTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Hello, ${widget.firstName}!",
+              widget.firstName.trim().isEmpty
+                  ? "Hello, there!"
+                  : "Hello, ${widget.firstName}!",
               style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.black87),
             ),
             const SizedBox(height: 4),
@@ -162,7 +164,7 @@ class _HomeTabState extends State<HomeTab> {
           decoration: BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.05), blurRadius: 10)],
           ),
           child: IconButton(
             onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen())),

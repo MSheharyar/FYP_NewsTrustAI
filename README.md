@@ -4,6 +4,10 @@ This repo contains:
 - **`frontend/newstrustai/`**: Flutter app
 - **`backend/python_code/`**: FastAPI backend
 
+## Architecture & Limitations
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design, data flow, and known limitations.
+
 ## Backend quickstart
 
 ### Run FastAPI
@@ -22,26 +26,26 @@ Endpoints:
 - `POST /analyze-link` (also available as `POST /verify-link`)
 - `GET /trending`
 
-### Generate trending DB locally (not committed)
+### Evaluation and Metrics
 
-The trending feed is stored in a local JSON file (ignored by git): `global_news_db.json`.
-
-To generate/update it:
+To evaluate the system's performance on known claims:
 
 ```bash
-python backend\python_code\update_db.py
+python backend/python_code/evaluation.py
 ```
 
-Optional environment variables:
-- `DATABASE_FILE`: full path to the JSON DB (default: `backend/python_code/global_news_db.json`)
-- `DB_DAYS_BACK`, `DB_MAX_PER_FEED`, `DB_FETCH_BODY`, `DB_BODY_MAX_CHARS`
+This runs the verification pipeline on a test dataset of 10 real/fake claims and computes metrics:
+- Accuracy, Precision, Recall, F1 Score
+- Comparison between pipelines: hybrid (ensemble), BERT-only, hybrid without BERT
 
-### Model files
+Results are saved to `backend/python_code/evaluation_results.json`.
 
-Large model artifacts are intentionally **not committed** (they previously caused pushes to time out).
+**Sample Results:**
+- Hybrid pipeline: 80% accuracy, 81.8% F1
+- BERT-only: 70% accuracy, 72.7% F1
+- Hybrid no BERT: 60% accuracy, 66.7% F1
 
-If you want to enable local model inference, download/place your model directory somewhere and point the backend to it:
-- Set `MODEL_DIR` to your model folder path
+This demonstrates the ensemble approach improves reliability over model-only predictions.
 
 ## Flutter quickstart
 

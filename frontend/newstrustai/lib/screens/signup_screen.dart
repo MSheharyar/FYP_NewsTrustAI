@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:newstrustai/services/auth_service.dart';
+import '../utils/app_utils.dart';
+import '../widgets/logo_widget.dart';
 import 'login_screen.dart';
 import 'package:newstrustai/screens/home/home_screen.dart';
 
@@ -34,27 +38,9 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
-  void showSnackBar(String message, {Color color = Colors.blue}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-          ),
-        ),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        duration: const Duration(seconds: 4),
-      ),
-    );
-  }
+  void showSnackBar(String message, {Color color = Colors.blue}) =>
+      showAppSnackBar(context, message,
+          color: color, duration: const Duration(seconds: 4));
 
   bool isValidEmail(String email) {
     return RegExp(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").hasMatch(email);
@@ -64,12 +50,61 @@ class _SignupScreenState extends State<SignupScreen> {
     return password.length >= 8 && RegExp(r'(?=.*?[!@#\$&*~])').hasMatch(password);
   }
 
-  String _normalizePhone(String phone) {
-    phone = phone.trim();
-    if (phone.isEmpty) return "";
-    if (phone.startsWith("0")) return "+92${phone.substring(1)}";
-    if (!phone.startsWith("+") && phone.length >= 10) return "+92$phone";
-    return phone;
+  Future<void> _ensureFirestoreDoc(User user) async {
+    final docRef = _db.collection('users').doc(user.uid);
+    final doc = await docRef.get();
+    if (!doc.exists) {
+      await docRef.set({
+        'displayName': user.displayName ?? '',
+        'email': user.email ?? '',
+        'photoUrl': user.photoURL ?? '',
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await AuthService().signInWithGoogle();
+      if (user != null) {
+        await _ensureFirestoreDoc(user);
+      }
+      if (user != null && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => HomeScreen(firstName: user.displayName ?? 'User')),
+        );
+        showSnackBar('Google Sign-up successful!', color: Colors.blue);
+      }
+    } catch (e) {
+      showSnackBar('Google Sign-in failed or was canceled.', color: Colors.red);
+      debugPrint('Google Auth Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleFacebookSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await AuthService().signInWithFacebook();
+      if (user != null) {
+        await _ensureFirestoreDoc(user);
+      }
+      if (user != null && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => HomeScreen(firstName: user.displayName ?? 'User')),
+        );
+        showSnackBar('Facebook Sign-up successful!', color: Colors.blue);
+      }
+    } catch (e) {
+      showSnackBar('Facebook Sign-in failed or was canceled.', color: Colors.red);
+      debugPrint('Facebook Auth Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<bool> _phoneAlreadyUsed(String phoneE164) async {
@@ -82,7 +117,7 @@ class _SignupScreenState extends State<SignupScreen> {
     final lastName = lastNameController.text.trim();
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
-    final phone = _normalizePhone(numberController.text);
+    final phone = normalizePhone(numberController.text);
 
     if (firstName.isEmpty || lastName.isEmpty || email.isEmpty || password.isEmpty || phone.isEmpty) {
       showSnackBar("All fields are required", color: Colors.red);
@@ -155,7 +190,7 @@ class _SignupScreenState extends State<SignupScreen> {
     } on FirebaseAuthException catch (e) {
       showSnackBar(e.message ?? "Signup failed", color: Colors.red);
     } catch (e) {
-      print("Signup Error: $e");
+      debugPrint("Signup Error: $e");
       showSnackBar("Something went wrong", color: Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -177,26 +212,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const SizedBox(height: 80),
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.blue.withOpacity(0.1),
-                              blurRadius: 20,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: Image.asset(
-                          "assets/images/logo.png",
-                          width: 150,
-                          height: 150,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
+                      const LogoWidget(size: 150, padding: 20, shadowBlur: 20),
                       const SizedBox(height: 16),
                       const Text(
                         'NewsTrust AI',
@@ -333,7 +349,74 @@ class _SignupScreenState extends State<SignupScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 24),
+                      // ---- Social sign-up ----
+                      Row(
+                        children: const [
+                          Expanded(child: Divider()),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 10),
+                            child: Text(
+                              'OR continue with',
+                              style: TextStyle(color: Colors.grey, fontSize: 13),
+                            ),
+                          ),
+                          Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      GestureDetector(
+                        onTap: _handleGoogleSignIn,
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: Card(
+                            shadowColor: Colors.blue,
+                            elevation: 1,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                FaIcon(FontAwesomeIcons.google, color: Colors.blue),
+                                SizedBox(width: 10),
+                                Text(
+                                  'Continue with Google',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: _handleFacebookSignIn,
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: Card(
+                            shadowColor: Colors.blueAccent,
+                            elevation: 1,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                FaIcon(FontAwesomeIcons.facebook, color: Color(0xFF1877F2)),
+                                SizedBox(width: 10),
+                                Text(
+                                  'Continue with Facebook',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 30),
                     ],
                   ),
                 ),

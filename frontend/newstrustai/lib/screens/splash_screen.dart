@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'onboarding_screen.dart';
 
 
 class SplashScreen extends StatefulWidget {
@@ -41,13 +43,25 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _boot() async {
     await Future.delayed(const Duration(milliseconds: 1600));
+    if (!mounted) return;
+
+    // Check if onboarding has been shown before
+    final prefs = await SharedPreferences.getInstance();
+    final seenOnboarding = prefs.getBool('onboarding_seen') ?? false;
 
     if (!mounted) return;
 
-    // ✅ More reliable than reading currentUser once
+    if (!seenOnboarding) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+      );
+      return;
+    }
+
+    // Normal auth flow
     final sub = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (!mounted) return;
-
       if (user == null) {
         Navigator.pushReplacementNamed(context, '/login');
       } else {
@@ -60,7 +74,6 @@ class _SplashScreenState extends State<SplashScreen>
       }
     });
 
-    // Avoid memory leak (optional)
     Future.delayed(const Duration(milliseconds: 200), () => sub.cancel());
   }
 
@@ -98,11 +111,11 @@ class _SplashScreenState extends State<SplashScreen>
                     child: Container(
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.85),
+                        color: Colors.white.withValues(alpha:0.85),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
+                            color: Colors.black.withValues(alpha:0.06),
                             blurRadius: 18,
                             offset: const Offset(0, 8),
                           ),

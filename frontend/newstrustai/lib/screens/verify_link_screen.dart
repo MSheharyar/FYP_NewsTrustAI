@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../services/api_service.dart';
+import '../utils/app_utils.dart';
+import '../widgets/analysis_loading_overlay.dart';
 import 'result/result_screen.dart';
 
 class VerifyLinkScreen extends StatefulWidget {
@@ -73,34 +75,6 @@ class _VerifyLinkScreenState extends State<VerifyLinkScreen> {
     return "Untitled";
   }
 
-  String? _extractUrl(dynamic item) {
-    Map<String, dynamic> m = {};
-    if (item is Map<String, dynamic>) {
-      m = item;
-    } else if (item is Map) {
-      m = Map<String, dynamic>.from(item);
-    }
-
-    final v = m["url"] ??
-        m["link"] ??
-        m["articleUrl"] ??
-        m["article_url"] ??
-        m["newsUrl"] ??
-        m["news_url"] ??
-        m["sourceUrl"] ??
-        m["source_url"] ??
-        m["webUrl"] ??
-        m["web_url"];
-
-    if (v == null) return null;
-
-    final s = v.toString().trim();
-    if (s.isEmpty) return null;
-
-    if (s.startsWith("www.")) return "https://$s";
-    return s;
-  }
-
   bool _isValidUrl(String url) {
     final u = url.trim();
     if (u.isEmpty) return false;
@@ -167,187 +141,187 @@ class _VerifyLinkScreenState extends State<VerifyLinkScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F8),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text(
-          "Verify Link",
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w700),
-        ),
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.black87),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Paste article link below", style: TextStyle(color: Colors.black54)),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: _controller,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  hintText: "https://example.com/news/...",
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(14)),
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: const Color(0xFFF0F4F8),
+          appBar: AppBar(
+            title: const Text("Verify Link"),
+            centerTitle: true,
+          ),
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Paste article link below",
+                    style: TextStyle(color: Colors.grey[500]),
                   ),
-                ),
-              ),
+                  const SizedBox(height: 12),
 
-              const SizedBox(height: 20),
-
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _safeAnalyzeLink,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[600],
-                    disabledBackgroundColor: Colors.blue[200],
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    elevation: 2,
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          "Analyze Link",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(LucideIcons.info, color: Colors.blue[700], size: 18),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text(
-                        "Tip: Link verification works best for article pages (not social media screenshots). "
-                        "Paste the full URL including https://",
-                        style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.35),
+                  TextField(
+                    controller: _controller,
+                    keyboardType: TextInputType.url,
+                    style: const TextStyle(color: Colors.black87),
+                    decoration: InputDecoration(
+                      hintText: "https://example.com/news/...",
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(14)),
+                        borderSide: BorderSide.none,
                       ),
                     ),
-                  ],
-                ),
-              ),
+                  ),
 
-              // ✅ Trending Examples (Links)
-              const SizedBox(height: 22),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    "Trending Examples",
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  const SizedBox(height: 20),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _safeAnalyzeLink,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[600],
+                        disabledBackgroundColor: Colors.blue[200],
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 2,
+                      ),
+                      child: const Text(
+                        "Analyze Link",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                    ),
                   ),
-                  IconButton(
-                    tooltip: "Refresh",
-                    onPressed: _loadTrendingLinks,
-                    icon: const Icon(LucideIcons.refreshCcw, size: 18),
+
+                  const SizedBox(height: 14),
+
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(LucideIcons.info, color: Colors.blue[700], size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            "Tip: Link verification works best for article pages (not social media). "
+                            "Paste the full URL including https://",
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[500],
+                                height: 1.35),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+
+                  const SizedBox(height: 22),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Trending Examples",
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
+                      IconButton(
+                        tooltip: "Refresh",
+                        onPressed: _loadTrendingLinks,
+                        icon: const Icon(LucideIcons.refreshCcw, size: 18),
+                      ),
+                    ],
+                  ),
+
+                  if (_loadingTrending)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 10),
+                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
+                  else if (_trending.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(
+                        "No trending links available",
+                        style: TextStyle(color: Colors.grey[500]),
+                      ),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _trending.length > 5 ? 5 : _trending.length,
+                      itemBuilder: (context, i) {
+                        final item = _trending[i];
+                        final title = _extractTitle(item);
+                        final url = extractNewsUrl(item);
+
+                        return Container(
+                          margin: const EdgeInsets.only(top: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.04),
+                                blurRadius: 12,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(LucideIcons.trendingUp,
+                                  color: Colors.green[600], size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 13, height: 1.25),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              OutlinedButton(
+                                onPressed: (url == null || url.isEmpty)
+                                    ? null
+                                    : () => setState(
+                                        () => _controller.text = url),
+                                child: const Text("Use"),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                 ],
               ),
-
-              if (_loadingTrending)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                )
-              else if (_trending.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: Text("No trending links available",
-                      style: TextStyle(color: Colors.black54)),
-                )
-              else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _trending.length > 5 ? 5 : _trending.length,
-                  itemBuilder: (context, i) {
-                    final item = _trending[i];
-                    final title = _extractTitle(item);
-                    final url = _extractUrl(item);
-
-                    return Container(
-                      margin: const EdgeInsets.only(top: 10),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
-                            blurRadius: 12,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.trendingUp, color: Colors.green[600], size: 18),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.black87,
-                                height: 1.25,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          OutlinedButton(
-                            onPressed: (url == null || url.isEmpty)
-                                ? null
-                                : () => setState(() => _controller.text = url),
-                            child: const Text("Use"),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-            ],
+            ),
           ),
         ),
-      ),
+
+        // Animated loading overlay
+        if (_isLoading) const AnalysisLoadingOverlay(),
+      ],
     );
   }
 }

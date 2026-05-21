@@ -1,13 +1,14 @@
 import 'dart:convert';
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:http/http.dart' as http;
 
 class ApiService {
   // Backend Configuration
-  // Set USE_LOCAL_BACKEND to true for development, false for production
-  static const bool USE_LOCAL_BACKEND = true; // ✅ Set to true for local testing
+  // Set useLocalBackend to true for development, false for production
+  static const bool useLocalBackend = true; // ✅ Set to true for local testing
 
   // Optional override:
   // flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8000
@@ -15,14 +16,14 @@ class ApiService {
       const String.fromEnvironment('API_BASE_URL', defaultValue: '').trim();
   
   // Production Server (AWS EC2 or deployed backend)
-  static const String _productionUrl = "http://3.107.3.81:8000";
+  static const String _productionUrl = "http://127.0.0.1:8000"; // FORCED TO LOCALHOST
   
   // Local Development
   // Web/Desktop use localhost, Mobile uses device-specific URLs
   static String get _localUrl {
     // Keep original behavior: web builds use the deployed backend by default.
     // Use --dart-define=API_BASE_URL=... to override when needed.
-    if (kIsWeb) return _productionUrl;
+    if (kIsWeb) return "http://127.0.0.1:8000";
 
     // Android emulator cannot reach host via localhost.
     if (defaultTargetPlatform == TargetPlatform.android) {
@@ -34,7 +35,16 @@ class ApiService {
   
   static String get _base {
     if (_baseUrlOverride.isNotEmpty) return _baseUrlOverride;
-    return USE_LOCAL_BACKEND ? _localUrl : _productionUrl;
+    return useLocalBackend ? _localUrl : _productionUrl;
+  }
+
+  static Future<Map<String, String>> _authHeaders() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final token = await user?.getIdToken();
+    return {
+      "Content-Type": "application/json",
+      if (token != null) "Authorization": "Bearer $token",
+    };
   }
 
   static String _extractErrorMessage(http.Response res) {
@@ -59,7 +69,7 @@ class ApiService {
       // ignore JSON errors; fall back below
     }
     if (res.body.trim().isNotEmpty && res.body.length < 200) {
-      return "${fallback}: ${res.body.trim()}";
+      return "$fallback: ${res.body.trim()}";
     }
     return fallback;
   }
@@ -72,7 +82,7 @@ class ApiService {
       final res = await http
           .post(
             Uri.parse("$_base$path"),
-            headers: {"Content-Type": "application/json"},
+            headers: await _authHeaders(),
             body: jsonEncode(payload),
           )
           .timeout(const Duration(seconds: 25));
@@ -94,8 +104,9 @@ class ApiService {
 
   static Future<List<dynamic>> _getList(String path) async {
     try {
+      final headers = await _authHeaders();
       final res = await http
-          .get(Uri.parse("$_base$path"))
+          .get(Uri.parse("$_base$path"), headers: headers)
           .timeout(const Duration(seconds: 25));
 
       if (res.statusCode == 200) {
@@ -138,6 +149,18 @@ class ApiService {
   static Future<List<dynamic>> fetchQuickExamples() async {
     final items = await fetchTrending();
     return items.take(5).toList();
+  }
+
+  static Future<Map<String, dynamic>> chat(
+    String message, {
+    List<Map<String, dynamic>>? history,
+    String? context,
+  }) {
+    return _postJson("/chat", {
+      "message": message,
+      if (history != null && history.isNotEmpty) "history": history,
+      if (context != null && context.isNotEmpty) "context": context,
+    });
   }
 
   // ✅ Robust: fixes www., //, relative paths, "null"/"none"

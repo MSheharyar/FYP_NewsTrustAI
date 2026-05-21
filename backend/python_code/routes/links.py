@@ -1,17 +1,23 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, HttpUrl
+import logging
 from typing import Tuple
+
 import requests
 from bs4 import BeautifulSoup
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, HttpUrl
 
-from services.verification import hybrid_decision
+from routes.verify import run_full_pipeline, limiter
 from utils.net import get_domain, domain_in_set
-from config.settings import MAIN_SOURCE_DOMAINS
+from config.settings import MAIN_SOURCE_DOMAINS, LINK_FETCH_TIMEOUT
+from middleware.auth import require_firebase_auth
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
 
 class AnalyzeLinkRequest(BaseModel):
     url: HttpUrl
+
 
 def fetch_article_text(url: str) -> Tuple[str, str]:
     headers = {
@@ -28,52 +34,101 @@ def fetch_article_text(url: str) -> Tuple[str, str]:
     }
 
     session = requests.Session()
-    response = session.get(url, headers=headers, timeout=20)
+    response = session.get(url, headers=headers, timeout=LINK_FETCH_TIMEOUT)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    for tag in soup(["script", "style", "noscript", "iframe"]):
+    for tag in soup(["script", "style", "noscript", "iframe", "nav", "header", "footer", "aside"]):
         tag.decompose()
 
-    candidates = [
-        soup.find("article"),
-        soup.find("div", class_="story__content"),
-        soup.find("div", class_="story__body"),
-        soup.find("div", class_="content"),
-        soup.find("div", class_="main-content"),
+    title = (soup.title.string or "").strip() if soup.title else ""
+
+    # BBC publishes article body as multiple data-component="text-block" divs
+    bbc_blocks = soup.find_all("div", attrs={"data-component": "text-block"})
+    if bbc_blocks:
+        text = " ".join(b.get_text(" ", strip=True) for b in bbc_blocks)
+        if len(text) > 200:
+            return title, text
+
+    # Ordered selectors: site-specific first, then generic semantic/structural
+    selectors = [
+        ("article", {}),
+        ("div", {"class": "article__content"}),        # CNN
+        ("div", {"class": "article-body"}),             # Reuters, AP
+        ("div", {"class": "story-content"}),            # Dawn
+        ("div", {"class": "story__content"}),           # ARY News
+        ("div", {"class": "story__body"}),              # ARY News
+        ("div", {"class": "wysiwyg--all-content"}),     # Al Jazeera
+        ("div", {"class": "article__body"}),            # BBC fallback
+        ("div", {"class": "post__content"}),            # Guardian variants
+        ("div", {"class": "entry-content"}),            # WordPress generic
+        ("div", {"class": "post-content"}),             # WordPress generic
+        ("div", {"class": "td-post-content"}),          # WordPress TDPaper theme
+        ("div", {"class": "main-content"}),
+        ("div", {"class": "content"}),
+        ("div", {"id": "article-body"}),
+        ("div", {"id": "content"}),
+        ("main", {}),
     ]
 
-    for c in candidates:
-        if c:
-            text = " ".join(c.get_text(" ", strip=True).split())
+    for tag, attrs in selectors:
+        el = soup.find(tag, attrs) if attrs else soup.find(tag)
+        if el:
+            text = " ".join(el.get_text(" ", strip=True).split())
             if len(text) > 200:
-                title = soup.title.string if soup.title else ""
-                return title or "", text
+                return title, text
 
+    # Paragraph fallback: join substantial <p> tags (skips nav/footer noise)
+    paras = soup.find_all("p")
+    if paras:
+        text = " ".join(
+            p.get_text(" ", strip=True)
+            for p in paras
+            if len(p.get_text(strip=True)) > 40
+        )
+        if len(text) > 200:
+            return title, text
+
+    # Last resort: raw page text
     text = " ".join(soup.get_text(" ", strip=True).split())
-    title = soup.title.string if soup.title else ""
-    return title or "", text
+    return title, text
 
 
-@router.post("/verify-link")
-def verify_link(payload: AnalyzeLinkRequest):
-    return analyze_link(payload)
+def _attach_link_meta(
+    result: dict,
+    url: str,
+    title: str,
+    domain: str,
+    is_main_source: bool,
+    extraction_error,
+    note: str = "",
+) -> None:
+    result["link_url"]   = url
+    result["link_title"] = title or ""
+    result["link_domain"] = domain
+    result["extraction_error"] = extraction_error
+    if note:
+        result["note"] = note
+    # Only set source_tier from the URL domain when hybrid couldn't determine
+    # it from evidence — avoids overwriting a meaningful hybrid verdict.
+    if result.get("source_tier", "unknown") == "unknown":
+        result["source_tier"] = "main" if is_main_source else "other"
+    if "final_confidence" not in result and result.get("confidence") is not None:
+        result["final_confidence"] = result["confidence"]
 
 
-@router.post("/analyze-link")
-def analyze_link(payload: AnalyzeLinkRequest):
-    url = str(payload.url).strip()
-
+def _core(payload: AnalyzeLinkRequest) -> dict:
+    url    = str(payload.url).strip()
     domain = get_domain(url)
     is_main_source = domain_in_set(domain, MAIN_SOURCE_DOMAINS)
 
-    title = ""
-    extracted_text = ""
+    title            = ""
+    extracted_text   = ""
     extraction_error = None
 
     try:
-        title, text = fetch_article_text(url)
+        title, text  = fetch_article_text(url)
         extracted_text = ((title or "") + "\n\n" + (text or "")).strip()
         if len(extracted_text) < 80:
             extraction_error = "Could not extract enough article text."
@@ -86,7 +141,7 @@ def analyze_link(payload: AnalyzeLinkRequest):
     except Exception as e:
         extraction_error = str(e)
 
-    # If invalid path => 404 => do NOT verify
+    # 404 — invalid link, skip verification entirely
     if extraction_error and ("404" in extraction_error or "Not Found" in extraction_error):
         return {
             "error": False,
@@ -104,34 +159,32 @@ def analyze_link(payload: AnalyzeLinkRequest):
             "extraction_error": extraction_error,
         }
 
-    # If extraction fails (403/anti-bot), run fallback
+    # 403 / anti-bot — fall back to verifying just the title
     if extraction_error and not extracted_text:
-        fallback_text = (title or "").strip() or url
-        result = hybrid_decision(fallback_text, source_domain=domain)
-        result.update({
-            "link_url": url,
-            "link_title": title or "",
-            "link_domain": domain,
-            "source_tier": "main" if is_main_source else "other",
-            "extraction_error": extraction_error,
-            "note": "Site blocked full-text extraction (403/anti-bot). Used fallback verification.",
-        })
-        if ("final_confidence" not in result) and (result.get("confidence") is not None):
-            result["final_confidence"] = result["confidence"]
+        fallback = (title or "").strip() or url
+        result   = run_full_pipeline(fallback)
+        _attach_link_meta(
+            result, url, title, domain, is_main_source, extraction_error,
+            note="Site blocked full-text extraction. Verified using title only.",
+        )
         return result
 
-    # Normal case: verify extracted content
-    result = hybrid_decision(extracted_text, source_domain=domain)
-    if isinstance(result, dict) and result.get("error") is True:
-        # hybrid_decision should not error here, but keep behavior predictable.
-        raise HTTPException(status_code=400, detail=str(result.get("message") or "Unable to verify link text"))
-    result.update({
-        "link_url": url,
-        "link_title": title or "",
-        "link_domain": domain,
-        "source_tier": "main" if is_main_source else "other",
-        "extraction_error": extraction_error,
-    })
-    if ("final_confidence" not in result) and (result.get("confidence") is not None):
-        result["final_confidence"] = result["confidence"]
+    # Normal path — run the full pipeline on the extracted article text
+    result = run_full_pipeline(extracted_text)
+    _attach_link_meta(result, url, title, domain, is_main_source, extraction_error)
     return result
+
+
+@router.post("/analyze-link")
+@limiter.limit("10/minute")
+def analyze_link(request: Request, payload: AnalyzeLinkRequest, user: dict = Depends(require_firebase_auth)):
+    result = _core(payload)
+    if isinstance(result, dict) and result.get("error") is True:
+        raise HTTPException(status_code=400, detail=str(result.get("message") or "Unable to verify link"))
+    return result
+
+
+@router.post("/verify-link")
+@limiter.limit("10/minute")
+def verify_link(request: Request, payload: AnalyzeLinkRequest, user: dict = Depends(require_firebase_auth)):
+    return analyze_link(request, payload, user)

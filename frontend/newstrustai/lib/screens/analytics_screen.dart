@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../utils/app_utils.dart';
 
 class AnalyticsScreen extends StatelessWidget {
   const AnalyticsScreen({super.key});
@@ -9,7 +11,7 @@ class AnalyticsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    
+
     if (user == null) {
       return const Scaffold(
         body: Center(child: Text("Please log in to view analytics")),
@@ -19,7 +21,8 @@ class AnalyticsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
-        title: const Text("Verification Insights", style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+        title: const Text("Verification Insights",
+            style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
@@ -44,9 +47,11 @@ class AnalyticsScreen extends StatelessWidget {
                 children: [
                   Icon(LucideIcons.barChart3, size: 80, color: Colors.grey[300]),
                   const SizedBox(height: 20),
-                  const Text("No verification history yet", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                  const Text("No verification history yet",
+                      style: TextStyle(color: Colors.grey, fontSize: 16)),
                   const SizedBox(height: 8),
-                  const Text("Start verifying news to see insights", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  const Text("Start verifying news to see insights",
+                      style: TextStyle(color: Colors.grey, fontSize: 14)),
                 ],
               ),
             );
@@ -54,8 +59,7 @@ class AnalyticsScreen extends StatelessWidget {
 
           final docs = snapshot.data!.docs;
           final totalScans = docs.length;
-          
-          // Calculate statistics
+
           int fakeCount = 0;
           int realCount = 0;
           int unverifiedCount = 0;
@@ -65,17 +69,15 @@ class AnalyticsScreen extends StatelessWidget {
           for (var doc in docs) {
             final data = doc.data() as Map<String, dynamic>;
             final verdict = (data['verdict'] ?? '').toString().toLowerCase();
-            
-            // Count by verdict
-            if (verdict == 'fake' || verdict == 'false') {
+
+            if (verdictIsFake(verdict)) {
               fakeCount++;
-            } else if (verdict == 'real' || verdict == 'verified') {
+            } else if (verdictIsReal(verdict)) {
               realCount++;
             } else {
               unverifiedCount++;
             }
 
-            // Count by day (last 7 days)
             final createdAt = data['createdAt'] as Timestamp?;
             if (createdAt != null) {
               final date = createdAt.toDate();
@@ -83,11 +85,9 @@ class AnalyticsScreen extends StatelessWidget {
               verdictsByDay[dayName] = (verdictsByDay[dayName] ?? 0) + 1;
             }
 
-            // Track fake sources
-            if (verdict == 'fake' || verdict == 'false') {
+            if (verdictIsFake(verdict)) {
               final input = (data['input'] ?? '').toString();
               if (input.contains('http')) {
-                // Extract domain from URL
                 try {
                   final uri = Uri.parse(input);
                   final domain = uri.host.replaceAll('www.', '');
@@ -99,16 +99,15 @@ class AnalyticsScreen extends StatelessWidget {
             }
           }
 
-          // Calculate Percentages for FYP Rubric
-          int fakePercent = totalScans == 0 ? 0 : ((fakeCount / totalScans) * 100).round();
-          int realPercent = totalScans == 0 ? 0 : ((realCount / totalScans) * 100).round();
+          final fakePercent =
+              totalScans == 0 ? 0 : ((fakeCount / totalScans) * 100).round();
+          final realPercent =
+              totalScans == 0 ? 0 : ((realCount / totalScans) * 100).round();
 
-          // Get top 3 fake sources
           final topFakeSources = fakeSourceCounts.entries.toList()
             ..sort((a, b) => b.value.compareTo(a.value));
           final top3 = topFakeSources.take(3).toList();
 
-          // Get this week's data (last 7 days)
           final weekData = _getWeekData(verdictsByDay, totalScans);
 
           return SingleChildScrollView(
@@ -132,7 +131,7 @@ class AnalyticsScreen extends StatelessWidget {
                       child: _OverviewCard(
                         label: "Fake Detected",
                         value: fakeCount.toString(),
-                        subtitle: "($fakePercent%)", // Added Percentage
+                        subtitle: "($fakePercent%)",
                         color: Colors.red,
                         icon: LucideIcons.alertTriangle,
                       ),
@@ -146,7 +145,7 @@ class AnalyticsScreen extends StatelessWidget {
                       child: _OverviewCard(
                         label: "Verified Real",
                         value: realCount.toString(),
-                        subtitle: "($realPercent%)", // Added Percentage
+                        subtitle: "($realPercent%)",
                         color: Colors.green,
                         icon: LucideIcons.checkCircle,
                       ),
@@ -164,18 +163,32 @@ class AnalyticsScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 25),
 
-                // 2. Weekly Activity Chart
+                // 2. Verdict Pie Chart
+                _VerdictPieChart(
+                  fakeCount: fakeCount,
+                  realCount: realCount,
+                  unverifiedCount: unverifiedCount,
+                ),
+                const SizedBox(height: 25),
+
+                // 3. Weekly Activity Chart
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 10,
+                      )
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text("Weekly Breakdown", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const Text("Weekly Breakdown",
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 20),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -184,7 +197,9 @@ class AnalyticsScreen extends StatelessWidget {
                           return _BarColumn(
                             label: day['day'] as String,
                             height: (day['height'] as double).clamp(10.0, 120.0),
-                            color: day['count'] as int > 0 ? Colors.blue : Colors.blue[50]!,
+                            color: (day['count'] as int) > 0
+                                ? Colors.blue
+                                : Colors.blue.shade50,
                             count: day['count'] as int,
                           );
                         }).toList(),
@@ -194,9 +209,10 @@ class AnalyticsScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 25),
 
-                // 3. Top Fake Sources (only show if there are any)
+                // 4. Top Fake Sources
                 if (top3.isNotEmpty) ...[
-                  const Text("Most Frequent Fake Sources", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text("Most Frequent Fake Sources",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 15),
                   ...top3.map((entry) {
                     final maxCount = top3.first.value;
@@ -243,36 +259,186 @@ class AnalyticsScreen extends StatelessWidget {
     return days[weekday - 1];
   }
 
-  List<Map<String, dynamic>> _getWeekData(Map<String, int> verdictsByDay, int total) {
+  List<Map<String, dynamic>> _getWeekData(
+      Map<String, int> verdictsByDay, int total) {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    final maxCount = verdictsByDay.values.isEmpty ? 1 : verdictsByDay.values.reduce((a, b) => a > b ? a : b);
-    
+    final maxCount = verdictsByDay.values.isEmpty
+        ? 1
+        : verdictsByDay.values.reduce((a, b) => a > b ? a : b);
+
     return days.map((day) {
       final count = verdictsByDay[day] ?? 0;
       final height = count == 0 ? 10.0 : (count / maxCount * 100.0 + 20.0);
-      
-      return {
-        'day': day,
-        'count': count,
-        'height': height,
-      };
+      return {'day': day, 'count': count, 'height': height};
     }).toList();
   }
 }
 
+// ─────────────────────────── Pie Chart ───────────────────────────
+
+class _VerdictPieChart extends StatefulWidget {
+  final int fakeCount;
+  final int realCount;
+  final int unverifiedCount;
+
+  const _VerdictPieChart({
+    required this.fakeCount,
+    required this.realCount,
+    required this.unverifiedCount,
+  });
+
+  @override
+  State<_VerdictPieChart> createState() => _VerdictPieChartState();
+}
+
+class _VerdictPieChartState extends State<_VerdictPieChart> {
+  int _touchedIndex = -1;
+
+  static const _colors = [
+    Color(0xFFEF5350), // Fake — red
+    Color(0xFF66BB6A), // Real — green
+    Color(0xFFFFA726), // Unverified — orange
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final total =
+        widget.fakeCount + widget.realCount + widget.unverifiedCount;
+    if (total == 0) return const SizedBox.shrink();
+
+    final counts = [widget.fakeCount, widget.realCount, widget.unverifiedCount];
+    final labels = ['Fake', 'Real', 'Unverified'];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Verdict Breakdown",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 180,
+                  child: PieChart(
+                    PieChartData(
+                      pieTouchData: PieTouchData(
+                        touchCallback: (event, response) {
+                          setState(() {
+                            _touchedIndex = (event.isInterestedForInteractions &&
+                                    response?.touchedSection != null)
+                                ? response!.touchedSection!.touchedSectionIndex
+                                : -1;
+                          });
+                        },
+                      ),
+                      sections: List.generate(3, (i) {
+                        final isTouched = i == _touchedIndex;
+                        final radius = isTouched ? 72.0 : 60.0;
+                        final pct = ((counts[i] / total) * 100).round();
+                        return PieChartSectionData(
+                          value: counts[i].toDouble(),
+                          title: counts[i] > 0 ? '$pct%' : '',
+                          color: _colors[i],
+                          radius: radius,
+                          titleStyle: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        );
+                      }),
+                      centerSpaceRadius: 0,
+                      sectionsSpace: 2,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 24),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: List.generate(3, (i) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _LegendItem(
+                      color: _colors[i],
+                      label: labels[i],
+                      count: counts[i],
+                      total: total,
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String label;
+  final int count;
+  final int total;
+
+  const _LegendItem({
+    required this.color,
+    required this.label,
+    required this.count,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total == 0 ? 0 : ((count / total) * 100).round();
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '$label  $count ($pct%)',
+          style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────── Overview Card ───────────────────────────
+
 class _OverviewCard extends StatelessWidget {
   final String label;
   final String value;
-  final String? subtitle; // Added for percentage
+  final String? subtitle;
   final Color color;
   final IconData icon;
 
   const _OverviewCard({
-    required this.label, 
-    required this.value, 
-    this.subtitle, 
-    required this.color, 
-    required this.icon
+    required this.label,
+    required this.value,
+    this.subtitle,
+    required this.color,
+    required this.icon,
   });
 
   @override
@@ -282,7 +448,12 @@ class _OverviewCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+          )
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,12 +463,17 @@ class _OverviewCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              Text(value,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               if (subtitle != null) ...[
                 const SizedBox(width: 5),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 3.0),
-                  child: Text(subtitle!, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 14)),
+                  child: Text(subtitle!,
+                      style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14)),
                 ),
               ]
             ],
@@ -310,25 +486,36 @@ class _OverviewCard extends StatelessWidget {
   }
 }
 
+// ─────────────────────────── Bar Column ───────────────────────────
+
 class _BarColumn extends StatelessWidget {
   final String label;
   final double height;
   final Color color;
   final int count;
 
-  const _BarColumn({required this.label, required this.height, required this.color, required this.count});
+  const _BarColumn(
+      {required this.label,
+      required this.height,
+      required this.color,
+      required this.count});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         if (count > 0)
-          Text(count.toString(), style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+          Text(count.toString(),
+              style: const TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey,
+                  fontWeight: FontWeight.bold)),
         if (count > 0) const SizedBox(height: 4),
         Container(
           width: 12,
           height: height,
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+          decoration:
+              BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
         ),
         const SizedBox(height: 8),
         Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -337,18 +524,22 @@ class _BarColumn extends StatelessWidget {
   }
 }
 
+// ─────────────────────────── Source Tile ───────────────────────────
+
 class _SourceTile extends StatelessWidget {
   final String name;
   final int count;
   final double percentage;
 
-  const _SourceTile({required this.name, required this.count, required this.percentage});
+  const _SourceTile(
+      {required this.name, required this.count, required this.percentage});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(16)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -362,7 +553,8 @@ class _SourceTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Text("$count detected", style: TextStyle(color: Colors.red[400], fontSize: 12)),
+              Text("$count detected",
+                  style: TextStyle(color: Colors.red[400], fontSize: 12)),
             ],
           ),
           const SizedBox(height: 8),

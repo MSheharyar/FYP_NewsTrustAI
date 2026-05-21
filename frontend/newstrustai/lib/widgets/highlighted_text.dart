@@ -51,18 +51,18 @@ class HighlightedText extends StatelessWidget {
       switch (impact) {
         case 'negative':
           // Red for suspicious/fake indicators
-          bgColor = Colors.red.withOpacity(0.15 + (score * 0.15));
+          bgColor = Colors.red.withValues(alpha:0.15 + (score * 0.15));
           textColor = Colors.red[900]!;
           break;
         case 'positive':
           // Green for credible indicators
-          bgColor = Colors.green.withOpacity(0.15 + (score * 0.15));
+          bgColor = Colors.green.withValues(alpha:0.15 + (score * 0.15));
           textColor = Colors.green[900]!;
           break;
         case 'neutral':
         default:
           // Blue for factual elements (names, numbers)
-          bgColor = Colors.blue.withOpacity(0.10 + (score * 0.10));
+          bgColor = Colors.blue.withValues(alpha:0.10 + (score * 0.10));
           textColor = Colors.blue[900]!;
       }
 
@@ -118,19 +118,19 @@ class HighlightingLegend extends StatelessWidget {
           Row(
             children: [
               _LegendItem(
-                color: Colors.red.withOpacity(0.2),
+                color: Colors.red.withValues(alpha:0.2),
                 label: "Suspicious indicators",
               ),
               const SizedBox(width: 12),
               _LegendItem(
-                color: Colors.green.withOpacity(0.2),
+                color: Colors.green.withValues(alpha:0.2),
                 label: "Credible signals",
               ),
             ],
           ),
           const SizedBox(height: 4),
           _LegendItem(
-            color: Colors.blue.withOpacity(0.15),
+            color: Colors.blue.withValues(alpha:0.15),
             label: "Factual elements (names, dates, numbers)",
           ),
         ],

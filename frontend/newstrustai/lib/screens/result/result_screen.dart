@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'result_parser.dart';
@@ -9,6 +10,135 @@ import 'widgets/matched_source_card.dart';
 import 'widgets/debug_details_card.dart';
 import '/services/firestore_history_service.dart';
 import '/widgets/highlighted_text.dart';
+import '/screens/chatbot_screen.dart';
+
+// ─── Radial confidence gauge ────────────────────────────────────────────────
+
+class _ConfidenceGauge extends StatefulWidget {
+  final double value; // 0–100
+  final Color color;
+  const _ConfidenceGauge({required this.value, required this.color});
+
+  @override
+  State<_ConfidenceGauge> createState() => _ConfidenceGaugeState();
+}
+
+class _ConfidenceGaugeState extends State<_ConfidenceGauge>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900));
+    _anim = Tween<double>(begin: 0, end: widget.value / 100)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) => CustomPaint(
+        size: const Size(110, 110),
+        painter: _GaugePainter(
+          progress: _anim.value,
+          color: widget.color,
+          trackColor: widget.color.withValues(alpha: 0.12),
+        ),
+        child: SizedBox(
+          width: 110,
+          height: 110,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "${(widget.value * _anim.value).toStringAsFixed(0)}%",
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: widget.color,
+                  ),
+                ),
+                Text(
+                  "confidence",
+                  style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GaugePainter extends CustomPainter {
+  final double progress; // 0.0 – 1.0
+  final Color color;
+  final Color trackColor;
+  const _GaugePainter(
+      {required this.progress,
+      required this.color,
+      required this.trackColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const startAngle = 2.356; // 135° in radians (bottom-left)
+    const sweepFull = 4.712; // 270°
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.shortestSide / 2) - 8;
+    final strokeWidth = 10.0;
+
+    final trackPaint = Paint()
+      ..color = trackColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    final fillPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    // Track (background arc)
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      startAngle,
+      sweepFull,
+      false,
+      trackPaint,
+    );
+
+    // Fill arc
+    if (progress > 0) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepFull * progress,
+        false,
+        fillPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GaugePainter old) => old.progress != progress;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 class ResultScreen extends StatefulWidget {
   final Map<String, dynamic> data;
@@ -74,7 +204,7 @@ class _ResultScreenState extends State<ResultScreen> {
       inputUrl: widget.resultMode == "link" ? inputUrl : null,
     );
 
-    final String verdict = vm.isReal ? "verified" : (vm.isFake ? "fake" : "unverified");
+    final String verdict = vm.isReal ? "verified" : (vm.isFake ? "fake" : (vm.isMixed ? "mixed" : "unverified"));
 
     final List<Map<String, dynamic>> topMatches = vm.sources.map((s) {
       return {
@@ -112,7 +242,7 @@ class _ResultScreenState extends State<ResultScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 14,
             offset: const Offset(0, 6),
           )
@@ -125,7 +255,7 @@ class _ResultScreenState extends State<ResultScreen> {
             ExpansionTile(
               initiallyExpanded: true, // Keep the most important one open!
               leading: const Icon(LucideIcons.info, color: Colors.blue),
-              title: const Text("Why this result?", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              title: Text(vm.reasonTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
               childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
                 Text(vm.reasonText, style: const TextStyle(color: Colors.black87, height: 1.4)),
@@ -134,14 +264,25 @@ class _ResultScreenState extends State<ResultScreen> {
             const Divider(height: 1),
             ExpansionTile(
               leading: const Icon(LucideIcons.search, color: Colors.purple),
-              title: const Text("What we checked", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              title: const Text("Verification Process", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
               childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
-                Text(vm.whatCheckedText, style: const TextStyle(color: Colors.black87, height: 1.4)),
+                ...vm.whatCheckedText
+                    .split('\n')
+                    .where((line) => line.trim().isNotEmpty)
+                    .map(
+                      (line) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          line.trim(),
+                          style: const TextStyle(color: Colors.black87, height: 1.5),
+                        ),
+                      ),
+                    ),
                 if (vm.queryUsed.trim().isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Text(
-                    "Query: ${vm.queryUsed}",
+                    "Query used: ${vm.queryUsed}",
                     style: TextStyle(color: Colors.grey[700], fontSize: 12, fontStyle: FontStyle.italic),
                   ),
                 ],
@@ -150,7 +291,7 @@ class _ResultScreenState extends State<ResultScreen> {
             const Divider(height: 1),
             ExpansionTile(
               leading: const Icon(LucideIcons.lightbulb, color: Colors.orange),
-              title: const Text("What you can do next", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              title: const Text("Next Steps", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
               childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
                 ...vm.tips.map(
@@ -183,6 +324,353 @@ class _ResultScreenState extends State<ResultScreen> {
           Text(title, style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.black87, fontSize: 16)),
         ],
       ),
+    );
+  }
+
+  Widget _buildResultSummary(ResultViewModel vm) {
+    final String methodLabel = _prettyMethodName(vm.method);
+    final double confidence = vm.confidence?.clamp(0, 100).toDouble() ?? 0.0;
+    final bool hasConfidence = vm.confidence != null;
+    final bool hasDisagreement = vm.modelDisagreement;
+    final Color statusColor = vm.isReal
+        ? Colors.green[700]!
+        : vm.isFake
+            ? Colors.red[700]!
+            : vm.isMixed
+                ? Colors.purple[700]!
+                : Colors.orange[800]!;
+    final String statusLabel = vm.isReal
+        ? "Supports the claim"
+        : vm.isFake
+            ? "Contradicts the claim"
+            : vm.isMixed
+                ? "Disputed / mixed signals"
+                : "Insufficient evidence";
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Quick summary", style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    Text(methodLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.black87)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (hasConfidence) ...[
+            Center(
+              child: _ConfidenceGauge(
+                value: confidence,
+                color: statusColor,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          if (vm.queryUsed.trim().isNotEmpty) ...[
+            Text("Query used", style: TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text(vm.queryUsed, style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4)),
+          ],
+          if (hasDisagreement) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.alertTriangle, size: 16, color: Colors.orange[700]),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "Model and evidence disagree. Review this result carefully.",
+                      style: TextStyle(color: Colors.orange[900], fontSize: 13, height: 1.4, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _prettyMethodName(String method) {
+    switch (method.toLowerCase().trim()) {
+      case "db_match":
+        return "Verified by database coverage";
+      case "soft_db_match":
+        return "Soft match in stored news coverage";
+      case "weak_similar_coverage":
+        return "Weak related coverage found";
+      case "google_factcheck":
+        return "Published fact-check evidence";
+      case "gdelt_main_sources":
+        return "Live lookup from major sources";
+      case "gdelt_other_major_sources":
+        return "Live lookup from other major sources";
+      case "edited_claim_suspected":
+        return "Related coverage found, but key facts mismatch";
+      case "input_too_vague":
+        return "Input was too vague to verify";
+      case "bert_only":
+        return "Model-only prediction";
+      case "db_and_bert":
+        return "Database evidence with model validation";
+      case "factcheck_and_bert":
+        return "Fact-check evidence with model validation";
+      case "db_and_bert_conflict":
+      case "factcheck_and_bert_conflict":
+        return "Evidence and model disagreement";
+      default:
+        return "System evidence from multiple checks";
+    }
+  }
+
+  Widget _buildModelEvidenceCard(ResultViewModel vm) {
+    final bool hasModel = vm.bertLabel.isNotEmpty;
+    final bool isFake = vm.bertLabel == "fake";
+    final String evidenceType = _prettyMethodName(vm.method);
+    final String predictionText = hasModel ? (isFake ? "Fake / Misleading" : "Real") : "Not used";
+    final String consensusText = vm.modelDisagreement
+        ? "Evidence and model disagree. This result requires careful review."
+        : hasModel
+            ? "Evidence and model are aligned." 
+            : "Model prediction was not available.";
+    final Color titleColor = vm.modelDisagreement ? Colors.orange[800]! : Colors.blueGrey[900]!;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(LucideIcons.layers, size: 18, color: titleColor),
+              const SizedBox(width: 10),
+              Text(
+                "How the verdict was reached",
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: titleColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            "Evidence source: $evidenceType",
+            style: TextStyle(fontWeight: FontWeight.w700, color: Colors.black87),
+          ),
+          const SizedBox(height: 8),
+          if (hasModel) ...[
+            Text(
+              "Model signal: $predictionText",
+              style: TextStyle(fontWeight: FontWeight.w700, color: titleColor),
+            ),
+            const SizedBox(height: 12),
+            if (vm.bertConfidence != null) ...[
+              Row(
+                children: [
+                  Text(
+                    "${vm.bertConfidence!.toStringAsFixed(0)}%",
+                    style: TextStyle(fontWeight: FontWeight.w800, color: titleColor),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Model confidence",
+                      style: const TextStyle(color: Colors.black54, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: LinearProgressIndicator(
+                  value: (vm.bertConfidence! / 100.0).clamp(0.0, 1.0),
+                  minHeight: 8,
+                  backgroundColor: Colors.grey[200],
+                  valueColor: AlwaysStoppedAnimation<Color>(titleColor),
+                ),
+              ),
+            ],
+          ] else ...[
+            Text(
+              "Model signal: not available for this result.",
+              style: TextStyle(color: Colors.black54),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Text(
+            consensusText,
+            style: TextStyle(color: vm.modelDisagreement ? Colors.orange[800]! : Colors.black54, height: 1.4),
+          ),
+          if (vm.nliConfirmed) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.teal[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.checkCircle2, size: 15, color: Colors.teal[700]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Semantically verified — NLI model confirms the claim matches trusted sources.",
+                      style: TextStyle(color: Colors.teal[800], fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (vm.staleEvidence) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.amber[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.clock, size: 15, color: Colors.amber[800]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      vm.evidenceAgeDays != null
+                          ? "Evidence is ${vm.evidenceAgeDays} days old — verify with current sources."
+                          : "Evidence may be outdated — verify with current sources.",
+                      style: TextStyle(color: Colors.amber[900], fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (vm.bertNote != null && vm.bertNote!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.info, size: 15, color: Colors.grey[600]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "AI model note: ${vm.bertNote}",
+                      style: TextStyle(color: Colors.grey[700], fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          _buildLanguageBadge(vm.detectedLanguage),
+        ],
+      ),
+    );
+  }
+
+  String _buildChatContext(ResultViewModel vm) {
+    final buf = StringBuffer();
+    // Include the actual claim so the AI knows WHAT was verified
+    final claim = (widget.originalText ?? widget.usedQuery ?? '').trim();
+    if (claim.isNotEmpty) buf.writeln("Claim: \"$claim\"");
+    buf.writeln("Verdict: ${vm.verdictTitle} (${vm.badgeText})");
+    if (vm.confidence != null) {
+      buf.writeln("Confidence: ${vm.confidence!.toStringAsFixed(0)}%");
+    }
+    buf.writeln("Verification method: ${vm.method}");
+    buf.writeln("Reason: ${vm.reasonText}");
+    if (vm.bertLabel.isNotEmpty) {
+      buf.write("AI model prediction: ${vm.bertLabel}");
+      if (vm.bertConfidence != null) {
+        buf.write(" (${vm.bertConfidence!.toStringAsFixed(0)}% confidence)");
+      }
+      buf.writeln();
+    }
+    if (vm.modelDisagreement) {
+      buf.writeln("Note: Evidence and model disagreed on this result.");
+    }
+    if (vm.sources.isNotEmpty) {
+      buf.writeln("Matched sources: ${vm.sources.map((s) => s.source).join(", ")}");
+    }
+    return buf.toString().trim();
+  }
+
+  Widget _buildLanguageBadge(String lang) {
+    final bool isUrdu = lang == "urdu";
+    final Color bg = isUrdu ? const Color(0xFFE8F5E9) : const Color(0xFFE3F2FD);
+    final Color fg = isUrdu ? const Color(0xFF2E7D32) : const Color(0xFF1565C0);
+    final String label = isUrdu ? "Verified in: اردو (Urdu)" : "Verified in: English";
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(LucideIcons.globe, size: 14, color: fg),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+        ),
+      ],
     );
   }
 
@@ -234,17 +722,35 @@ class _ResultScreenState extends State<ResultScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
-        backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(LucideIcons.x, color: Colors.black87),
+          icon: const Icon(LucideIcons.x),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           "Analysis Result",
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w800),
+          style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: "Share result",
+            icon: const Icon(LucideIcons.share2),
+            onPressed: () {
+              final conf = vm.confidence != null
+                  ? "${vm.confidence!.toStringAsFixed(0)}% confidence"
+                  : "";
+              final sources = vm.sources.isNotEmpty
+                  ? "\nSources: ${vm.sources.take(3).map((s) => s.source).join(', ')}"
+                  : "";
+              final text =
+                  "NewsTrust AI Result\n\nVerdict: ${vm.verdictTitle}\n$conf\n\n"
+                  "${vm.reasonText}$sources\n\n"
+                  "Verified using NewsTrust AI — an AI-powered fake news detector.";
+              Share.share(text, subject: "NewsTrust AI Verification Result");
+            },
+          ),
+        ],
       ),
       body: SafeArea(
         // 🌟 Replaced SingleChildScrollView with hyper-performant CustomScrollView! 🌟
@@ -264,6 +770,12 @@ class _ResultScreenState extends State<ResultScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  _buildResultSummary(vm),
+                  const SizedBox(height: 16),
+
+                  _buildModelEvidenceCard(vm),
+                  if (vm.bertLabel.isNotEmpty) const SizedBox(height: 16),
+
                   if (hasExplainability) ...[
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -272,7 +784,7 @@ class _ResultScreenState extends State<ResultScreen> {
                         borderRadius: BorderRadius.circular(18),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
+                            color: Colors.black.withValues(alpha: 0.04),
                             blurRadius: 14,
                             offset: const Offset(0, 8),
                           )
@@ -322,7 +834,7 @@ class _ResultScreenState extends State<ResultScreen> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 6))
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 6))
                         ],
                       ),
                       child: Column(
@@ -340,7 +852,7 @@ class _ResultScreenState extends State<ResultScreen> {
                               Expanded(child: Text("Domain: ${linkDomain.isEmpty ? "unknown" : linkDomain}", style: const TextStyle(color: Colors.black54, fontSize: 12))),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(color: tierColor().withOpacity(0.12), borderRadius: BorderRadius.circular(999)),
+                                decoration: BoxDecoration(color: tierColor().withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
                                 child: Text(tierText(), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: tier == "main" ? Colors.green[700] : Colors.orange[700])),
                               )
                             ],
@@ -455,10 +967,40 @@ class _ResultScreenState extends State<ResultScreen> {
                 ),
               ),
 
+            // Ask AI Button
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: SizedBox(
+                  height: 54,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatbotScreen(
+                          verificationContext: _buildChatContext(vm),
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(LucideIcons.bot, size: 18),
+                    label: const Text(
+                      "Ask AI to explain this result",
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.blue[700],
+                      side: BorderSide(color: Colors.blue[200]!),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
             // Verify Another Button (Bottom Spacer)
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                 child: SizedBox(
                   height: 54,
                   child: ElevatedButton(

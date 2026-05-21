@@ -1,0 +1,52 @@
+[
+  {
+    "claim": "Pakistan's Prime Minister Imran Khan resigned on April 10, 2022.",
+    "label": "real",
+    "source": "Historical fact"
+  },
+  {
+    "claim": "The COVID-19 vaccine causes infertility in women.",
+    "label": "fake",
+    "source": "Debunked by WHO"
+  },
+  {
+    "claim": "Ukraine invaded Russia in February 2022.",
+    "label": "fake",
+    "source": "Reversed historical event"
+  },
+  {
+    "claim": "Elon Musk bought Twitter for $44 billion in 2022.",
+    "label": "real",
+    "source": "Publicly announced deal"
+  },
+  {
+    "claim": "5G towers spread coronavirus.",
+    "label": "fake",
+    "source": "Debunked conspiracy theory"
+  },
+  {
+    "claim": "The 2020 US election was rigged.",
+    "label": "fake",
+    "source": "Court rulings and audits"
+  },
+  {
+    "claim": "Climate change is a hoax invented by scientists.",
+    "label": "fake",
+    "source": "Scientific consensus"
+  },
+  {
+    "claim": "India and Pakistan agreed to ceasefire in Kashmir in 2021.",
+    "label": "real",
+    "source": "Official statements"
+  },
+  {
+    "claim": "Bill Gates plans to microchip the population via vaccines.",
+    "label": "fake",
+    "source": "Debunked misinformation"
+  },
+  {
+    "claim": "The Taliban took control of Afghanistan in August 2021.",
+    "label": "real",
+    "source": "Historical event"
+  }
+]

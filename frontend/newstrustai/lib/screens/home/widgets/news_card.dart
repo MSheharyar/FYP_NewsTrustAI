@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '/../services/api_service.dart';
+import '/../utils/app_utils.dart';
 import '../../verify_link_screen.dart';
 
 class NewsCard extends StatelessWidget {
@@ -12,7 +13,7 @@ class NewsCard extends StatelessWidget {
     final map = item is Map ? Map<String, dynamic>.from(item) : <String, dynamic>{};
     final String title = (map['title'] ?? 'No Title').toString();
     final String source = (map['source'] ?? 'News').toString();
-    final String? url = _extractUrl(map);
+    final String? url = extractNewsUrl(map);
     final String? imageUrl = ApiService.resolveNewsImageUrl(map);
 
     return Container(
@@ -20,7 +21,7 @@ class NewsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.05), blurRadius: 15, offset: const Offset(0, 5))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -64,14 +65,6 @@ class NewsCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String? _extractUrl(Map m) {
-    final v = m['url'] ?? m['link'] ?? m['articleUrl'];
-    if (v == null) return null;
-    String s = v.toString();
-    if (s.startsWith("www.")) s = "https://$s";
-    return s;
   }
 
   Widget _buildImage(String? url) {

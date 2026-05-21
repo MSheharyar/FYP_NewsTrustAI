@@ -1,32 +1,34 @@
+import logging
+import os
+
 import numpy as np
 from lime.lime_text import LimeTextExplainer
-import re
+
+logger = logging.getLogger(__name__)
+
+# 300 samples was the original default but causes ~30 s on CPU (300 BERT calls).
+# 100 is stable enough for top-5 word highlights and cuts latency by 3×.
+# Override with LIME_NUM_SAMPLES env var if needed.
+_NUM_SAMPLES = int(os.getenv("LIME_NUM_SAMPLES", "100"))
 
 # Initialize explainer (Index 0 = 'fake', Index 1 = 'real')
 explainer = LimeTextExplainer(class_names=['fake', 'real'])
 
-def is_urdu(text: str) -> bool:
-    """Helper to detect if text contains Urdu/Arabic script."""
-    urdu_chars = re.findall(r'[\u0600-\u06FF]', text)
-    return len(urdu_chars) > 0
-
 def get_fake_highlights(text: str, predict_proba_fn, top_k: int = 5) -> list:
     """
     Uses LIME to extract the top words contributing to a 'fake' verdict.
-    
+
     predict_proba_fn: A function that takes a list of strings [text1, text2...]
                       and returns a 2D numpy array of probabilities like:
                       [[prob_fake, prob_real], [prob_fake, prob_real]]
     """
     try:
-        # Generate the explanation
-        # Notice we use fewer samples (num_samples=100) to ensure the API stays fast for mobile
         exp = explainer.explain_instance(
-            text, 
-            predict_proba_fn, 
-            labels=(0,),          # explicitly ask it to explain class 0 ('fake')
+            text,
+            predict_proba_fn,
+            labels=(0,),
             num_features=top_k,
-            num_samples=100       
+            num_samples=_NUM_SAMPLES,
         )
         
         # Extract weights specifically for the "fake" class (class 0)
@@ -41,5 +43,5 @@ def get_fake_highlights(text: str, predict_proba_fn, top_k: int = 5) -> list:
         return highlighted_words
         
     except Exception as e:
-        print(f"LIME Explainer Error: {e}")
+        logger.warning("LIME explainer failed: %s", e)
         return []

@@ -2,33 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../services/api_service.dart';
+import '../utils/app_utils.dart';
 import 'verify_link_screen.dart';
 
 class AllNewsScreen extends StatelessWidget {
   final List<dynamic> newsItems;
 
   const AllNewsScreen({super.key, required this.newsItems});
-
-  String? extractNewsUrl(Map<String, dynamic> m) {
-    dynamic v = m['url'] ??
-        m['link'] ??
-        m['articleUrl'] ??
-        m['article_url'] ??
-        m['newsUrl'] ??
-        m['news_url'] ??
-        m['sourceUrl'] ??
-        m['source_url'] ??
-        m['webUrl'] ??
-        m['web_url'];
-
-    if (v == null) return null;
-
-    final s = v.toString().trim();
-    if (s.isEmpty) return null;
-    if (s.startsWith("www.")) return "https://$s";
-    if (!s.startsWith("http")) return "https://$s";
-    return s;
-  }
 
   // =========================
   // Image helpers
@@ -138,7 +118,7 @@ class AllNewsScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha:0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),

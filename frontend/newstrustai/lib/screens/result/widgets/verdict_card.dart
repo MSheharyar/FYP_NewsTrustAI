@@ -63,10 +63,10 @@ class VerdictCard extends StatelessWidget {
   String _confidenceLine() {
     if (confidence == null) return "";
     final c = confidence!.clamp(0, 100).toDouble();
-    if (c >= 95) return "Very high confidence (95–100%)";
-    if (c >= 88) return "High confidence (88–95%)";
-    if (c >= 75) return "Medium confidence (75–88%)";
-    if (c > 0) return "Low confidence (${c.toStringAsFixed(0)}%)";
+    if (c >= 95) return "Very high accuracy (95–100%)";
+    if (c >= 85) return "High accuracy (85–95%)";
+    if (c >= 70) return "Medium accuracy (70–84%)";
+    if (c > 0) return "Low accuracy (${c.toStringAsFixed(0)}%) - Likely Fake/Unverified";
     return "Confidence unavailable";
   }
 
@@ -86,12 +86,12 @@ class VerdictCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 26), 
       decoration: BoxDecoration(
-        color: tone.withOpacity(isVerifiedStyle ? 0.08 : 0.06),
+        color: tone.withValues(alpha:isVerifiedStyle ? 0.08 : 0.06),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: tone.withOpacity(isVerifiedStyle ? 0.18 : 0.12)),
+        border: Border.all(color: tone.withValues(alpha:isVerifiedStyle ? 0.18 : 0.12)),
         boxShadow: [
           BoxShadow(
-            color: (isVerifiedStyle ? tone : Colors.black).withOpacity(isVerifiedStyle ? 0.18 : 0.05),
+            color: (isVerifiedStyle ? tone : Colors.black).withValues(alpha:isVerifiedStyle ? 0.18 : 0.05),
             blurRadius: 24,
             offset: const Offset(0, 10),
           ),
@@ -114,7 +114,7 @@ class VerdictCard extends StatelessWidget {
                     CircularProgressIndicator(
                       value: value, // Dynamically updates!
                       strokeWidth: 6,
-                      backgroundColor: tone.withOpacity(0.15),
+                      backgroundColor: tone.withValues(alpha:0.15),
                       valueColor: AlwaysStoppedAnimation<Color>(tone),
                     ),
                     Center(child: child!),
@@ -124,7 +124,7 @@ class VerdictCard extends StatelessWidget {
               child: Container(
                 margin: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: tone.withOpacity(0.14),
+                  color: tone.withValues(alpha:0.14),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: tone, size: 30),
@@ -135,6 +135,8 @@ class VerdictCard extends StatelessWidget {
           Text(
             title,
             textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: tone,
               fontSize: 22,
@@ -147,13 +149,13 @@ class VerdictCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.6),
+                color: Colors.white.withValues(alpha:0.6),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 confLine,
                 style: TextStyle(
-                  color: tone.withOpacity(0.9),
+                  color: tone.withValues(alpha:0.9),
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
                 ),

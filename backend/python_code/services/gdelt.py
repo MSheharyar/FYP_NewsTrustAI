@@ -1,22 +1,10 @@
-import os
 import requests
 from typing import Dict, Any
 from utils.net import get_domain, domain_in_set
-from config.settings import MAIN_SOURCE_DOMAINS
-
-OTHER_MAJOR_DOMAINS = {
-    "reuters.com", "www.reuters.com",
-    "apnews.com",
-    "aljazeera.com",
-    "theguardian.com",
-    "nytimes.com",
-    "washingtonpost.com",
-}
-
-CONF_VERY_LOW = float(os.getenv("CONF_VERY_LOW", "65.0"))
+from config.settings import MAIN_SOURCE_DOMAINS, OTHER_MAJOR_DOMAINS, CONF_VERY_LOW, GDELT_MAX_RESULTS, GDELT_RESULT_LIMIT
 
 
-def gdelt_lookup_domains(query: str, max_results: int = 30) -> Dict[str, Any]:
+def gdelt_lookup_domains(query: str, max_results: int = GDELT_MAX_RESULTS) -> Dict[str, Any]:
     q = (query or "").strip()
     if not q:
         return {
@@ -38,7 +26,7 @@ def gdelt_lookup_domains(query: str, max_results: int = 30) -> Dict[str, Any]:
     }
 
     try:
-        r = requests.get(url, params=params, timeout=12)
+        r = requests.get(url, params=params, timeout=12)  # network timeout, not in settings
         if r.status_code != 200:
             return {
                 "error": True,
@@ -81,7 +69,7 @@ def gdelt_lookup_domains(query: str, max_results: int = 30) -> Dict[str, Any]:
             "found_other": len(other_domains) > 0,
             "main_domains": sorted(list(main_domains)),
             "other_domains": sorted(list(other_domains)),
-            "items": items[:6],
+            "items": items[:GDELT_RESULT_LIMIT],
         }
 
     except Exception as e:

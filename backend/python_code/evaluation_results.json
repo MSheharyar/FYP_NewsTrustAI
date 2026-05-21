@@ -1,0 +1,47 @@
+{
+  "hybrid": {
+    "total_samples": 10,
+    "accuracy": 0.1,
+    "precision": 0.3333333333333333,
+    "recall": 1.0,
+    "f1_score": 0.5,
+    "tp": 1,
+    "fp": 2,
+    "tn": 0,
+    "fn": 0,
+    "per_label_accuracy": {
+      "real": 0.25,
+      "fake": 0.0
+    }
+  },
+  "bert_only": {
+    "total_samples": 10,
+    "accuracy": 0.0,
+    "precision": 0,
+    "recall": 0,
+    "f1_score": 0,
+    "tp": 0,
+    "fp": 0,
+    "tn": 0,
+    "fn": 0,
+    "per_label_accuracy": {
+      "real": 0.0,
+      "fake": 0.0
+    }
+  },
+  "hybrid_no_bert": {
+    "total_samples": 10,
+    "accuracy": 0.1,
+    "precision": 0.3333333333333333,
+    "recall": 1.0,
+    "f1_score": 0.5,
+    "tp": 1,
+    "fp": 2,
+    "tn": 0,
+    "fn": 0,
+    "per_label_accuracy": {
+      "real": 0.25,
+      "fake": 0.0
+    }
+  }
+}

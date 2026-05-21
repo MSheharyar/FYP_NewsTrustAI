@@ -4,13 +4,13 @@ import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/splash_screen.dart';
+import 'screens/onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
   runApp(const NewsVerifierApp());
 }
 
@@ -40,11 +40,14 @@ class NewsVerifierApp extends StatelessWidget {
       initialRoute: '/splash',
       routes: {
         '/splash': (context) => const SplashScreen(),
+        '/onboarding': (context) => const OnboardingScreen(),
         '/login': (context) => const LoginScreen(),
         '/home': (context) {
           final args = ModalRoute.of(context)?.settings.arguments;
           final String firstName =
-              (args is Map && args['firstName'] != null) ? args['firstName'].toString() : "";
+              (args is Map && args['firstName'] != null)
+                  ? args['firstName'].toString()
+                  : "";
           return HomeScreen(firstName: firstName);
         },
       },

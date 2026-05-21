@@ -3,8 +3,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:newstrustai/services/auth_service.dart';
+import '../utils/app_utils.dart';
+import '../widgets/logo_widget.dart';
 import 'signup_screen.dart';
-import 'home/home_screen.dart'; // Adjust path if needed
+import 'forgot_password_screen.dart';
+import 'otp_screen.dart';
+import 'home/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,51 +19,26 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController idController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   bool _isLoading = false;
-  bool _obscurePassword = true; // Added for password visibility
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
     idController.dispose();
     passwordController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
-  void showSnackBar(String message, {Color color = Colors.red}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
-        ),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
+  void showSnackBar(String message, {Color color = Colors.red}) =>
+      showAppSnackBar(context, message, color: color);
 
   bool _looksLikeEmail(String s) => s.contains("@");
-
-  String _normalizePhone(String phone) {
-    phone = phone.trim();
-    if (phone.isEmpty) return "";
-    if (phone.startsWith("0")) return "+92${phone.substring(1)}";
-    if (!phone.startsWith("+") && phone.length >= 10) return "+92$phone";
-    return phone;
-  }
 
   Future<String?> _emailForPhone(String phoneE164) async {
     final doc = await _db.collection("phone_to_email").doc(phoneE164).get();
@@ -87,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (_looksLikeEmail(id)) {
         email = id;
       } else {
-        final phone = _normalizePhone(id);
+        final phone = normalizePhone(id);
         if (!phone.startsWith("+")) {
           showSnackBar("Enter phone like +923001234567 or 03xx...");
           return;
@@ -122,11 +101,108 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // Extracted Google Login Logic
+  Future<void> _ensureFirestoreDoc(User user) async {
+    final docRef = _db.collection('users').doc(user.uid);
+    final doc = await docRef.get();
+    if (!doc.exists) {
+      await docRef.set({
+        'displayName': user.displayName ?? '',
+        'email': user.email ?? '',
+        'photoUrl': user.photoURL ?? '',
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+  }
+
+  Future<void> _sendOtp() async {
+    final phone = normalizePhone(_phoneController.text.trim());
+    if (!phone.startsWith('+')) {
+      showSnackBar('Enter phone like +923001234567 or 03xx...');
+      return;
+    }
+    setState(() => _isLoading = true);
+
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phone,
+        timeout: const Duration(seconds: 60),
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          try {
+            final userCredential = await _auth.signInWithCredential(credential);
+            final user = userCredential.user;
+            if (user != null) {
+              await _ensureFirestoreDoc(user);
+            }
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HomeScreen(firstName: user?.displayName ?? 'User'),
+              ),
+            );
+          } catch (_) {
+            if (mounted) setState(() => _isLoading = false);
+          }
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            showSnackBar(e.message ?? 'Phone verification failed.');
+          }
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => OtpScreen(
+                  verificationId: verificationId,
+                  phoneNumber: phone,
+                ),
+              ),
+            );
+          }
+        },
+        codeAutoRetrievalTimeout: (_) {},
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        showSnackBar('Failed to send OTP. Please try again.');
+      }
+    }
+  }
+
+  Future<void> _handleFacebookSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await AuthService().signInWithFacebook();
+      if (user != null) {
+        await _ensureFirestoreDoc(user);
+      }
+      if (user != null && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => HomeScreen(firstName: user.displayName ?? "User")),
+        );
+        showSnackBar("Facebook Login successful!", color: Colors.blue);
+      }
+    } catch (e) {
+      showSnackBar("Facebook Login failed or was canceled.", color: Colors.red);
+      debugPrint("Facebook Auth Error: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
     try {
       final user = await AuthService().signInWithGoogle();
+      if (user != null) {
+        await _ensureFirestoreDoc(user);
+      }
       if (user != null && mounted) {
         Navigator.pushReplacement(
           context,
@@ -136,7 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       showSnackBar("Google Login failed or was canceled.", color: Colors.red);
-      print("Google Auth Error: $e"); // Helpful for debugging
+      debugPrint("Google Auth Error: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -157,27 +233,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const SizedBox(height: 80),
-                      // LOGO
-                      Container(
-                        padding: const EdgeInsets.all(5),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.blue.withOpacity(0.1),
-                              blurRadius: 10,
-                              offset: const Offset(0, 5),
-                            )
-                          ],
-                        ),
-                        child: Image.asset(
-                          "assets/images/logo.png",
-                          width: 150,
-                          height: 150,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
+                      const LogoWidget(size: 150, padding: 5, shadowBlur: 10),
                       const SizedBox(height: 16),
                       const Text(
                         'NewsTrust AI',
@@ -229,7 +285,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: GestureDetector(
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+                          ),
+                          child: const Text(
+                            "Forgot Password?",
+                            style: TextStyle(
+                              color: Colors.blue,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       GestureDetector(
                         onTap: _login,
                         child: Container(
@@ -249,7 +322,57 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 24),
+                      // ---- Phone OTP section ----
+                      Row(
+                        children: const [
+                          Expanded(child: Divider()),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 10),
+                            child: Text(
+                              'OR login with OTP',
+                              style: TextStyle(color: Colors.grey, fontSize: 13),
+                            ),
+                          ),
+                          Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          hintText: 'Phone Number (+92... or 03xx...)',
+                          filled: true,
+                          fillColor: Colors.grey.shade100,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.all(14),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: _sendOtp,
+                        child: Container(
+                          width: double.infinity,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Send OTP',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
                       // SIGN UP
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -297,7 +420,34 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                      )
+                      ),
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: _handleFacebookSignIn,
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: Card(
+                            shadowColor: Colors.blueAccent,
+                            elevation: 1,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                FaIcon(FontAwesomeIcons.facebook, color: Color(0xFF1877F2)),
+                                SizedBox(width: 10),
+                                Text(
+                                  "Login with Facebook",
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                     ],
                   ),
                 ),

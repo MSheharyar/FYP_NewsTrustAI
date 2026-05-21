@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../../../utils/app_utils.dart';
 
 class StatsCard extends StatelessWidget {
   const StatsCard({super.key});
@@ -22,9 +23,9 @@ class StatsCard extends StatelessWidget {
     int verified = 0;
     int fake = 0;
     for (final d in snap.docs) {
-      final v = (d.data()["verdict"] ?? "").toString().toLowerCase();
-      if (v == "verified" || v == "real") verified++;
-      if (v == "fake" || v == "false") fake++;
+      final v = (d.data()["verdict"] ?? "").toString();
+      if (verdictIsReal(v)) verified++;
+      if (verdictIsFake(v)) fake++;
     }
 
     double? acc = (verified + fake > 0) ? (verified / (verified + fake)) * 100.0 : null;
@@ -44,7 +45,7 @@ class StatsCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(24),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 10))],
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.04), blurRadius: 20, offset: const Offset(0, 10))],
           ),
           child: Column(
             children: [

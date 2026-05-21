@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:newstrustai/services/auth_service.dart'; 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:newstrustai/services/auth_service.dart';
 import 'login_screen.dart';
-import 'edit_profile_screen.dart'; 
+import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -13,9 +16,8 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Dynamically grab the current user so UI updates automatically 
-  // when we return from the Edit Profile screen
   User? get user => FirebaseAuth.instance.currentUser;
+  bool _isUploadingPhoto = false;
 
   // Checks if the user logged in using a standard email and password
   bool get isEmailPasswordUser {
@@ -39,13 +41,173 @@ class _ProfileScreenState extends State<ProfileScreen> {
         "https://ui-avatars.com/api/?name=${displayName.replaceAll(' ', '+')}&background=random";
   }
 
-  // Dummy handler for scope management (FYP limitation)
-  void _showComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("This feature will be available in V2.0!"),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
+  Future<void> _pickAndUploadPhoto() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (picked == null) return;
+
+    final uid = user?.uid;
+    if (uid == null) return;
+
+    setState(() => _isUploadingPhoto = true);
+    try {
+      final ref = FirebaseStorage.instance.ref('profile_pictures/$uid.jpg');
+      await ref.putData(await picked.readAsBytes());
+      final downloadUrl = await ref.getDownloadURL();
+
+      await user!.updatePhotoURL(downloadUrl);
+      await user!.reload();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'photoUrl': downloadUrl}, SetOptions(merge: true));
+
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile photo updated!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to upload photo.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingPhoto = false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Account'),
+        content: const Text('Are you sure? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final uid = user?.uid;
+    if (uid == null) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).delete();
+      await user!.delete();
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.code == 'requires-recent-login'
+                ? 'Please sign out and sign in again before deleting your account.'
+                : (e.message ?? 'Failed to delete account.')),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete account.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showPrivacyDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.shield_outlined, color: Colors.blue),
+            SizedBox(width: 10),
+            Text("Privacy & Security"),
+          ],
+        ),
+        content: const Text(
+          "Your data is protected:\n\n"
+          "• Verification history is stored securely in Firebase Firestore.\n"
+          "• We never share your data with third parties.\n"
+          "• You can delete your history anytime from the History tab.\n"
+          "• All network traffic uses HTTPS encryption.\n"
+          "• Authentication is handled by Firebase Auth.",
+          style: TextStyle(height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Got it", style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: Colors.blue),
+            SizedBox(width: 10),
+            Text("How to Use"),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            "NewsTrustAI lets you verify news in three ways:\n\n"
+            "📝 Verify Text\n"
+            "Paste any news headline or paragraph. The system checks it against our database, live sources, and Google Fact Check.\n\n"
+            "🔗 Verify Link\n"
+            "Paste a full URL. The app fetches the article and runs the same checks.\n\n"
+            "🖼️ Scan Image\n"
+            "Upload a screenshot. OCR extracts the text and verifies it automatically.\n\n"
+            "🤖 AI Assistant\n"
+            "Chat with our AI for tips on spotting misinformation or to explain any result.\n\n"
+            "📊 History & Analytics\n"
+            "View all past verifications and see your personal trend insights.",
+            style: TextStyle(height: 1.6),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Close", style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
@@ -68,10 +230,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               child: Column(
                 children: [
-                  CircleAvatar(
-                    radius: 50,
-                    backgroundImage: NetworkImage(photoUrl),
-                    backgroundColor: Colors.blue.shade50,
+                  Stack(
+                    alignment: Alignment.bottomRight,
+                    children: [
+                      _isUploadingPhoto
+                          ? const SizedBox(
+                              width: 100,
+                              height: 100,
+                              child: CircularProgressIndicator(),
+                            )
+                          : CircleAvatar(
+                              radius: 50,
+                              backgroundImage: NetworkImage(photoUrl),
+                              backgroundColor: Colors.blue.shade50,
+                            ),
+                      GestureDetector(
+                        onTap: _isUploadingPhoto ? null : _pickAndUploadPhoto,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.camera_alt,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 15),
                   Text(
@@ -126,23 +314,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 children: [
-                  _ProfileOption(
-                    icon: LucideIcons.settings,
-                    title: "Settings",
-                    onTap: _showComingSoon,
-                  ),
-                  _ProfileOption(
-                    icon: LucideIcons.bell,
-                    title: "Notifications",
-                    onTap: _showComingSoon,
-                  ),
-                  
                   // ---------------- RESET PASSWORD ----------------
-                  if (isEmailPasswordUser) // <-- Hide this widget if false
+                  if (isEmailPasswordUser)
                     _ProfileOption(
                       icon: LucideIcons.key,
                       title: "Reset Password",
-                      onTap: () {
+                      onTap: () async {
                         if (user?.email == null || user!.email!.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text("No email associated with this account.")),
@@ -150,56 +327,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           return;
                         }
 
-                        showDialog(
+                        final messenger = ScaffoldMessenger.of(context);
+                        final send = await showDialog<bool>(
                           context: context,
-                          builder: (context) => AlertDialog(
+                          builder: (ctx) => AlertDialog(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                             title: const Text("Reset Password"),
                             content: Text("Send a password reset link to ${user!.email}?"),
                             actions: [
                               TextButton(
-                                onPressed: () => Navigator.pop(context),
+                                onPressed: () => Navigator.pop(ctx, false),
                                 child: const Text("Cancel"),
                               ),
                               ElevatedButton(
-                                onPressed: () async {
-                                  Navigator.pop(context); // Close dialog
-                                  try {
-                                    await AuthService().sendPasswordResetEmail(user!.email!);
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text("Reset link sent! Check your inbox."),
-                                        backgroundColor: Colors.green,
-                                      ),
-                                    );
-                                  } catch (e) {
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text("Failed to send reset link."),
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    );
-                                  }
-                                },
+                                onPressed: () => Navigator.pop(ctx, true),
                                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                                 child: const Text("Send", style: TextStyle(color: Colors.white)),
                               ),
                             ],
                           ),
                         );
+
+                        if (send != true || !mounted) return;
+                        try {
+                          await AuthService().sendPasswordResetEmail(user!.email!);
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text("Reset link sent! Check your inbox."),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } catch (_) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text("Failed to send reset link."),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       },
                     ),
-                  
+
                   _ProfileOption(
                     icon: LucideIcons.shield,
                     title: "Privacy & Security",
-                    onTap: _showComingSoon,
+                    onTap: _showPrivacyDialog,
                   ),
                   _ProfileOption(
                     icon: LucideIcons.helpCircle,
                     title: "Help & Support",
-                    onTap: _showComingSoon,
+                    onTap: _showHelpDialog,
                   ),
 
                   const SizedBox(height: 20),
@@ -211,14 +388,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     iconColor: Colors.red,
                     textColor: Colors.red,
                     onTap: () async {
-                      await AuthService().signOut(); 
-                      
-                      if (!mounted) return;
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const LoginScreen(),
-                        ),
+                      final nav = Navigator.of(context);
+                      await AuthService().signOut();
+                      nav.pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => const LoginScreen()),
                         (route) => false,
                       );
                     },
@@ -231,6 +404,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: TextStyle(
                       color: Colors.grey,
                       fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: _deleteAccount,
+                    child: const Text(
+                      'Delete Account',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -265,11 +449,11 @@ class _ProfileOption extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 5,
           ),
         ],
@@ -279,7 +463,7 @@ class _ProfileOption extends StatelessWidget {
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: (iconColor ?? Colors.blue).withOpacity(0.1),
+            color: (iconColor ?? Colors.blue).withValues(alpha:0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(

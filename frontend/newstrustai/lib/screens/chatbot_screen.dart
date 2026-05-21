@@ -3,7 +3,11 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../services/api_service.dart';
 
 class ChatbotScreen extends StatefulWidget {
-  const ChatbotScreen({super.key});
+  /// Optional verification result context loaded when launched from ResultScreen.
+  /// When non-null the bot opens with a context-aware greeting and themed chips.
+  final String? verificationContext;
+
+  const ChatbotScreen({super.key, this.verificationContext});
 
   @override
   State<ChatbotScreen> createState() => _ChatbotScreenState();
@@ -14,20 +18,77 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   final ScrollController _scroll = ScrollController();
   bool _isTyping = false;
 
-  final List<_ChatMsg> _messages = [
-    _ChatMsg.bot(
-      "Hi! I’m NewsTrust AI Bot 🤖\n\n"
-      "I can help you verify news and teach you how to spot misinformation.\n\n"
-      "Try asking: “How to spot fake news?” or paste a headline to verify.",
-    ),
-  ];
+  // Conversation history sent to the backend for multi-turn context.
+  // Each entry: {"role": "user"|"model", "parts": [String]}
+  final List<Map<String, dynamic>> _chatHistory = [];
 
-  // Updated Chips to match FYP Rubric
-  final List<_QuickChip> _chips = const [
-    _QuickChip("Spotting Tips 💡", "tips"),
-    _QuickChip("Verify News 🔍", "verify news"),
-    _QuickChip("How it works ⚙️", "help"),
-  ];
+  late final List<_ChatMsg> _messages;
+  late final List<_QuickChip> _chips;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final bool hasContext = widget.verificationContext != null &&
+        widget.verificationContext!.trim().isNotEmpty;
+
+    if (hasContext) {
+      // Parse key fields from context so the greeting shows the actual result
+      String claim = '';
+      String verdict = '';
+      String confidence = '';
+      String reason = '';
+      for (final line in widget.verificationContext!.split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.startsWith('Claim:')) {
+          claim = trimmed.replaceFirst('Claim:', '').trim();
+        } else if (trimmed.startsWith('Verdict:')) {
+          verdict = trimmed.replaceFirst('Verdict:', '').trim();
+        } else if (trimmed.startsWith('Confidence:')) {
+          confidence = trimmed.replaceFirst('Confidence:', '').trim();
+        } else if (trimmed.startsWith('Reason:')) {
+          reason = trimmed.replaceFirst('Reason:', '').trim();
+        }
+      }
+
+      final claimLine = claim.isNotEmpty ? '\n\n📰 Claim: $claim' : '';
+      final verdictLine = verdict.isNotEmpty ? '\n🔍 Verdict: $verdict' : '';
+      final confLine = confidence.isNotEmpty ? '\n📊 Confidence: $confidence' : '';
+      final reasonLine = reason.isNotEmpty ? '\n💬 Reason: $reason' : '';
+
+      _messages = [
+        _ChatMsg.bot(
+          "I can see you just verified a news claim 🔍"
+          "$claimLine$verdictLine$confLine$reasonLine\n\n"
+          "Ask me anything about this result — for example:\n"
+          "• \"Why was this classified as Fake?\"\n"
+          "• \"What evidence did you find?\"\n"
+          "• \"How confident are you in this result?\"",
+        ),
+      ];
+      _chips = const [
+        _QuickChip("Why Fake? 🤔", "Why was this claim classified as fake? Explain simply."),
+        _QuickChip("Explain Evidence 📋", "What evidence was found? Explain the sources and confidence score."),
+        _QuickChip("Spotting Tips 💡", "Give me practical tips to spot misinformation."),
+      ];
+    } else {
+      _messages = [
+        _ChatMsg.bot(
+          "Hi! I'm NewsTrust AI Bot 🤖\n\n"
+          "I can help you:\n"
+          "• Understand why news may be fake\n"
+          "• Learn to spot misinformation\n"
+          "• Guide you through news verification\n\n"
+          "Ask me anything or paste a headline to analyze.",
+        ),
+      ];
+      _chips = const [
+        _QuickChip("Spotting Tips 💡", "Give me practical tips to spot misinformation."),
+        _QuickChip("Verify News 🔍", "How can I verify news on my own? Step by step."),
+        _QuickChip("How it works ⚙️", "How does the NewsTrustAI verification system work?"),
+      ];
+    }
+  }
 
   @override
   void dispose() {
@@ -49,60 +110,96 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   Future<void> _send(String text) async {
     final msg = text.trim();
-    if (msg.isEmpty) return;
+    if (msg.isEmpty || _isTyping) return;
 
     setState(() {
       _messages.add(_ChatMsg.user(msg));
       _controller.clear();
     });
     _scrollToBottom();
-    await _botReply(msg);
+    await _sendToAI(msg);
   }
 
-  Future<void> _botReply(String userText) async {
+  /// Sends a user message to the Gemini backend and appends the reply.
+  Future<void> _sendToAI(String userText) async {
     setState(() => _isTyping = true);
     _scrollToBottom();
-    final lower = userText.toLowerCase().trim();
 
-    await Future.delayed(const Duration(milliseconds: 1200));
+    // Snapshot of history *before* this turn — backend appends the new message
+    final historySnapshot = List<Map<String, dynamic>>.from(_chatHistory);
 
-    // ✅ RUBRIC: Provides tips on spotting misinformation
-    if (lower.contains("tips") || lower.contains("spot") || lower.contains("how to")) {
-      _addBotMessage(
-        "🛡️ **Tips to Spot Misinformation:**\n\n"
-        "1. **Check the Source:** Is it a known news org or a random blog?\n"
-        "2. **Read Beyond the Headline:** Headlines are often clickbait.\n"
-        "3. **Check the Date:** Old news is often reshared as 'breaking'.\n"
-        "4. **Look for Evidence:** Does the article cite sources or quotes?\n"
-        "5. **Reverse Image Search:** Fake news often reuses old photos."
+    try {
+      final res = await ApiService.chat(
+        userText,
+        history: historySnapshot,
+        context: widget.verificationContext,
       );
-    } 
-    // ✅ RUBRIC: Explains why news may be fake
-    else if (lower.contains("why") && (lower.contains("fake") || lower.contains("misleading"))) {
-      _addBotMessage(
-        "News is often flagged as **Fake** if:\n"
-        "• It contradicts established facts from trusted sources.\n"
-        "• The metadata (dates/locations) doesn't match the claim.\n"
-        "• The language is designed to provoke extreme emotion rather than inform."
-      );
+
+      if (!mounted) return;
+
+      final reply = (res["reply"] as String?)?.trim() ?? "";
+
+      if (res["error"] == true || reply.isEmpty) {
+        final errMsg = (res["message"] as String?)?.trim() ?? "I couldn't get a response.";
+        _addBotMessage("❌ $errMsg");
+        return;
+      }
+
+      // Record both turns so future messages have full context
+      _chatHistory.add({"role": "user", "parts": [userText]});
+      _chatHistory.add({"role": "model", "parts": [reply]});
+
+      _addBotMessage(reply);
+    } catch (e) {
+      if (!mounted) return;
+      _addBotMessage("❌ Connection error. Please check your connection and try again.");
     }
-    else if (lower.contains("help") || lower.contains("how it works")) {
-      _addBotMessage("Paste any news headline here. I will run it through our mBERT model and cross-reference it with live news databases to give you a verdict.");
-    }
-    // Logic to offer verification for long strings
-    else if (userText.split(RegExp(r"\s+")).length >= 5) {
-      setState(() {
-        _messages.add(_ChatMsg.botWithAction(
-          "Do you want me to analyze this claim for authenticity?\n\n“$userText”",
-          actionLabel: "Verify Authenticity 🔍",
-          actionPayload: userText,
-        ));
-        _isTyping = false;
-      });
-    } else {
-      _addBotMessage("I'm here to help! Paste a claim to verify it, or ask for tips on spotting fake news.");
-    }
+  }
+
+  /// Runs the real verification pipeline and then asks Gemini to explain it.
+  Future<void> _verifyClaim(String claim) async {
+    setState(() => _isTyping = true);
     _scrollToBottom();
+
+    try {
+      // Step 1 — run the actual hybrid verification
+      final res = await ApiService.verifyText(claim);
+      if (!mounted) return;
+
+      if (res["error"] == true) {
+        _addBotMessage("❌ Verification failed: ${res["message"] ?? "Unknown error"}");
+        return;
+      }
+
+      final label = (res["final_label"] ?? "unverified").toString().toUpperCase();
+      final confidence = res["final_confidence"] ?? res["confidence"] ?? 0;
+      final reason = (res["final_reason"] ?? "").toString().trim();
+
+      final claimContext =
+          "Verification result for claim: \"$claim\"\n"
+          "Verdict: $label\n"
+          "Confidence: $confidence%\n"
+          "${reason.isNotEmpty ? "Reason: $reason" : ""}".trim();
+
+      // Step 2 — ask AI to explain the result in plain language
+      final historySnapshot = List<Map<String, dynamic>>.from(_chatHistory);
+      final aiRes = await ApiService.chat(
+        "Explain this verification result to the user in simple, friendly language.",
+        history: historySnapshot,
+        context: claimContext,
+      );
+      if (!mounted) return;
+
+      final reply = (aiRes["reply"] as String?)?.trim() ?? "Verdict: $label ($confidence% confidence)";
+
+      _chatHistory.add({"role": "user", "parts": ["Verify this claim: $claim"]});
+      _chatHistory.add({"role": "model", "parts": [reply]});
+
+      _addBotMessage(reply);
+    } catch (e) {
+      if (!mounted) return;
+      _addBotMessage("❌ Verification failed. Please try again in a moment.");
+    }
   }
 
   void _addBotMessage(String text) {
@@ -110,29 +207,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       _messages.add(_ChatMsg.bot(text));
       _isTyping = false;
     });
-  }
-
-  // ✅ RUBRIC: AI chatbot to guide users through verification
-  Future<void> _verifyClaim(String claim) async {
-    setState(() => _isTyping = true);
     _scrollToBottom();
-    
-    try {
-      final res = await ApiService.verifyText(claim);
-      if (!mounted) return;
-      
-      setState(() => _isTyping = false);
-      final label = (res["final_label"] ?? "unverified").toString().toUpperCase();
-      final reason = res["final_reason"] ?? "No specific discrepancy found, but evidence is limited.";
-      
-      _addBotMessage(
-        "📢 **Verification Result: $label**\n\n"
-        "**Analysis:** $reason\n\n"
-        "Remember to always check the 'Read original article' links in the Result screen for more context."
-      );
-    } catch (e) {
-      _addBotMessage("❌ I ran into an error while verifying. Please try again in a moment.");
-    }
   }
 
   @override
@@ -140,45 +215,92 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
-        title: const Text("AI Assistant", style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "AI Assistant",
+          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
+        actions: [
+          if (_chatHistory.isNotEmpty)
+            IconButton(
+              icon: const Icon(LucideIcons.rotateCcw, size: 18, color: Colors.black54),
+              tooltip: "Clear chat",
+              onPressed: () {
+                setState(() {
+                  _messages
+                    ..clear()
+                    ..add(_ChatMsg.bot("Chat cleared. How can I help you?"));
+                  _chatHistory.clear();
+                });
+              },
+            ),
+        ],
       ),
       body: Column(
         children: [
-          // Quick Chips
+          // Quick-action chips
           Container(
-            height: 60,
+            height: 56,
             color: Colors.white,
             child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               scrollDirection: Axis.horizontal,
+              itemCount: _chips.length,
               itemBuilder: (_, i) => ActionChip(
-                label: Text(_chips[i].title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                label: Text(
+                  _chips[i].title,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
                 backgroundColor: Colors.blue[50],
                 side: BorderSide.none,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                onPressed: () => _send(_chips[i].payload),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                onPressed: _isTyping ? null : () => _send(_chips[i].payload),
               ),
               separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemCount: _chips.length,
             ),
           ),
           const Divider(height: 1),
-          // Messages List
+
+          // Messages list
           Expanded(
             child: ListView.builder(
               controller: _scroll,
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length + (_isTyping ? 1 : 0),
               itemBuilder: (_, i) {
-                if (_isTyping && i == _messages.length) return const _TypingBubble();
-                return _ChatBubble(msg: _messages[i], onActionTap: _verifyClaim);
+                if (_isTyping && i == _messages.length) {
+                  return const _TypingBubble();
+                }
+                final msg = _messages[i];
+                // Offer a verify button for long user messages that look like claims
+                final bool showVerify = msg.isUser &&
+                    msg.text.split(RegExp(r"\s+")).length >= 5 &&
+                    !msg.hasAction;
+                if (showVerify) {
+                  return _ChatBubble(
+                    msg: _ChatMsg.botWithAction(
+                      "Would you like me to verify this claim?\n\n\"${msg.text}\"",
+                      actionLabel: "Verify Authenticity 🔍",
+                      actionPayload: msg.text,
+                    ),
+                    onActionTap: _verifyClaim,
+                    isTyping: _isTyping,
+                  );
+                }
+                return _ChatBubble(
+                  msg: msg,
+                  onActionTap: _verifyClaim,
+                  isTyping: _isTyping,
+                );
               },
             ),
           ),
-          // Input Area
+
+          // Input area
           Container(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
             decoration: const BoxDecoration(color: Colors.white),
@@ -187,22 +309,31 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    enabled: !_isTyping,
+                    maxLines: null,
+                    textInputAction: TextInputAction.send,
                     decoration: InputDecoration(
-                      hintText: "Ask me anything...",
+                      hintText: _isTyping ? "AI is thinking..." : "Ask me anything...",
                       filled: true,
                       fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(25), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
-                    onSubmitted: _send,
+                    onSubmitted: _isTyping ? null : _send,
                   ),
                 ),
                 const SizedBox(width: 8),
                 CircleAvatar(
-                  backgroundColor: Colors.blue[700],
+                  backgroundColor: _isTyping ? Colors.grey[300] : Colors.blue[700],
                   child: IconButton(
                     icon: const Icon(LucideIcons.send, color: Colors.white, size: 18),
-                    onPressed: () => _send(_controller.text),
+                    onPressed: _isTyping ? null : () => _send(_controller.text),
                   ),
                 ),
               ],
@@ -213,6 +344,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     );
   }
 }
+
+// ─────────────────────────── Data models ───────────────────────────
 
 class _QuickChip {
   final String title;
@@ -225,18 +358,37 @@ class _ChatMsg {
   final String text;
   final String? actionLabel;
   final String? actionPayload;
+  bool get hasAction => actionLabel != null;
 
-  const _ChatMsg._(this.isUser, this.text, {this.actionLabel, this.actionPayload});
+  const _ChatMsg._(
+    this.isUser,
+    this.text, {
+    this.actionLabel,
+    this.actionPayload,
+  });
+
   factory _ChatMsg.user(String t) => _ChatMsg._(true, t);
   factory _ChatMsg.bot(String t) => _ChatMsg._(false, t);
-  factory _ChatMsg.botWithAction(String t, {required String actionLabel, required String actionPayload}) 
-    => _ChatMsg._(false, t, actionLabel: actionLabel, actionPayload: actionPayload);
+  factory _ChatMsg.botWithAction(
+    String t, {
+    required String actionLabel,
+    required String actionPayload,
+  }) =>
+      _ChatMsg._(false, t, actionLabel: actionLabel, actionPayload: actionPayload);
 }
+
+// ─────────────────────────── Widgets ───────────────────────────
 
 class _ChatBubble extends StatelessWidget {
   final _ChatMsg msg;
-  final void Function(String payload) onActionTap;
-  const _ChatBubble({required this.msg, required this.onActionTap});
+  final void Function(String) onActionTap;
+  final bool isTyping;
+
+  const _ChatBubble({
+    required this.msg,
+    required this.onActionTap,
+    required this.isTyping,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +396,8 @@ class _ChatBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isUser) ...[
@@ -266,26 +419,44 @@ class _ChatBubble extends StatelessWidget {
                   bottomLeft: Radius.circular(isUser ? 18 : 0),
                   bottomRight: Radius.circular(isUser ? 0 : 18),
                 ),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5)],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 5,
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(msg.text, style: TextStyle(color: isUser ? Colors.white : Colors.black87, height: 1.4)),
+                  Text(
+                    msg.text,
+                    style: TextStyle(
+                      color: isUser ? Colors.white : Colors.black87,
+                      height: 1.5,
+                    ),
+                  ),
                   if (msg.actionLabel != null) ...[
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () => onActionTap(msg.actionPayload!),
+                        onPressed: isTyping
+                            ? null
+                            : () => onActionTap(msg.actionPayload!),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
                           foregroundColor: Colors.blue[700],
                           elevation: 0,
                           side: BorderSide(color: Colors.blue[100]!),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
-                        child: Text(msg.actionLabel!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(
+                          msg.actionLabel!,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],
@@ -302,15 +473,33 @@ class _ChatBubble extends StatelessWidget {
 
 class _TypingBubble extends StatelessWidget {
   const _TypingBubble();
+
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(left: 36, top: 4, bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-        child: const Text("Bot is typing...", style: TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.bot, size: 14, color: Colors.blue),
+            const SizedBox(width: 8),
+            Text(
+              "AI is thinking...",
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

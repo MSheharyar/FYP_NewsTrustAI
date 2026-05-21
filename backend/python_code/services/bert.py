@@ -2,7 +2,7 @@ import os
 import threading
 from typing import Any, Dict, Optional, Tuple
 
-from config.settings import MODEL_DIR
+from config.settings import MODEL_DIR, BERT_MAX_LENGTH
 
 LABELS = {0: "fake", 1: "real"}
 
@@ -114,7 +114,7 @@ def bert_predict(text: str) -> Dict[str, Any]:
         inputs = _tokenizer(
             text,
             truncation=True,
-            max_length=256,
+            max_length=BERT_MAX_LENGTH,
             return_tensors="pt",
         )
         inputs = {k: v.to(_device) for k, v in inputs.items()}

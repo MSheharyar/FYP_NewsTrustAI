@@ -6,8 +6,11 @@ __pycache__/
 *.safetensors
 *.log
 
-# Local notes / secrets (never commit)
+# Local notes / secrets / IDE settings (never commit)
 commands.txt
+.vscode/
+.claude/
+=*
 
 # Generated data (avoid committing constantly-changing DB dumps)
 **/global_news_db.json

@@ -1,5 +1,6 @@
 import re
 import math
+import threading
 from dataclasses import dataclass
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -7,16 +8,11 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer, util
 
-
-# ----------------------------
-# Configuration
-# ----------------------------
-NLI_MODEL_NAME = "roberta-large-mnli"
-EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+from config.settings import NLI_MODEL_NAME, EMBED_MODEL_NAME, MIN_TEXT_LEN
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-LABEL_MAP = {0: "CONTRADICTION", 1: "NEUTRAL", 2: "ENTAILMENT"}  # roberta-mnli default
+LABEL_MAP = {0: "CONTRADICTION", 1: "NEUTRAL", 2: "ENTAILMENT"}  # nli-MiniLM2 label order
 
 
 # ----------------------------
@@ -88,7 +84,7 @@ def build_search_queries(user_text: str) -> Tuple[List[str], str]:
 # ----------------------------
 def looks_unstructured(text: str) -> bool:
     text = normalize_spaces(text)
-    if len(text) < 35:
+    if len(text) < MIN_TEXT_LEN:
         return True
     # too many emojis/symbols or mostly lower-case slang
     non_alnum = sum(1 for c in text if not c.isalnum() and c not in " .,:;!?-'\"()")
@@ -171,6 +167,29 @@ class TextClaimVerifier:
         conf = float(probs[label_id])
         return label, conf
 
+    @torch.no_grad()
+    def nli_score_batch(self, claim: str, premises: List[str]) -> List[Tuple[str, float]]:
+        """Score claim against multiple premises in one forward pass."""
+        if not premises:
+            return []
+        inputs = self.nli_tokenizer(
+            [claim] * len(premises),
+            premises,
+            truncation=True,
+            max_length=384,
+            padding=True,
+            return_tensors="pt"
+        ).to(DEVICE)
+        logits = self.nli_model(**inputs).logits  # (N, 3)
+        probs = torch.softmax(logits, dim=-1).detach().cpu()
+        results = []
+        for i in range(len(premises)):
+            label_id = int(torch.argmax(probs[i]).item())
+            label = LABEL_MAP[label_id]
+            conf = float(probs[i][label_id].item())
+            results.append((label, conf))
+        return results
+
     def verify(
         self,
         user_text: str,
@@ -182,7 +201,12 @@ class TextClaimVerifier:
     ) -> Dict[str, Any]:
 
         user_text = normalize_spaces(user_text)
+        sents = split_sentences(user_text)
         queries, extracted_claim = build_search_queries(user_text)
+        # Collect up to 2 candidate claims for multi-sentence NLI selection.
+        claim_candidates = [extracted_claim]
+        if len(sents) >= 2 and sents[1] != extracted_claim and len(sents[1]) >= 30:
+            claim_candidates.append(sents[1])
 
         if looks_unstructured(user_text):
             return {
@@ -258,22 +282,87 @@ class TextClaimVerifier:
                 "nli": {"best_label": "NEUTRAL", "best_confidence": 0.0}
             }
 
-        # 3) NLI: entail / contradict / neutral (true claim verification)
-        best = {"label": "NEUTRAL", "conf": 0.0, "evidence": None, "semantic": 0.0}
-        for e, sem in ranked_sem:
-            premise = normalize_spaces((e.title + " " + e.snippet).strip())
-            if not premise:
-                continue
-            label, conf = self.nli_score(extracted_claim, premise)
-            # prioritize high-confidence contradiction/entailment
-            if conf > best["conf"]:
-                best = {"label": label, "conf": conf, "evidence": e, "semantic": sem}
+        # 3) NLI: batch scoring + vote aggregation.
+        #
+        # For multi-sentence input we try each claim candidate (up to 2) and
+        # keep the one that produces the strongest decisive NLI signal.  This
+        # prevents a neutral first sentence from masking a false second sentence.
+        premises = [
+            normalize_spaces((e.title + " " + e.snippet).strip())
+            for e, _ in ranked_sem
+        ]
+        valid = [(p, e, sem) for p, (e, sem) in zip(premises, ranked_sem) if p]
+
+        best_claim_candidate = extracted_claim
+        best_entail = {"conf": 0.0, "evidence": None, "semantic": 0.0}
+        best_contra = {"conf": 0.0, "evidence": None, "semantic": 0.0}
+        best_any = {"label": "NEUTRAL", "conf": 0.0, "evidence": None, "semantic": 0.0}
+        entail_score = 0.0
+        contra_score = 0.0
+        n_entail = 0
+        confidence_boost = 0.0
+
+        for candidate in claim_candidates:
+            if not valid:
+                break
+            valid_premises = [p for p, _, _ in valid]
+            nli_results = self.nli_score_batch(candidate, valid_premises)
+
+            c_entail = 0.0
+            c_contra = 0.0
+            c_best_entail = {"conf": 0.0, "evidence": None, "semantic": 0.0}
+            c_best_contra = {"conf": 0.0, "evidence": None, "semantic": 0.0}
+            c_best_any = {"label": "NEUTRAL", "conf": 0.0, "evidence": None, "semantic": 0.0}
+            c_n_entail = 0
+
+            for (label, conf), (_, e, sem) in zip(nli_results, valid):
+                weight = conf * (0.7 + 0.3 * sem)
+                if label == "ENTAILMENT":
+                    c_entail += weight
+                    c_n_entail += 1
+                    if conf > c_best_entail["conf"]:
+                        c_best_entail = {"conf": conf, "evidence": e, "semantic": sem}
+                elif label == "CONTRADICTION":
+                    c_contra += weight
+                    if conf > c_best_contra["conf"]:
+                        c_best_contra = {"conf": conf, "evidence": e, "semantic": sem}
+                if conf > c_best_any["conf"]:
+                    c_best_any = {"label": label, "conf": conf, "evidence": e, "semantic": sem}
+
+            # Pick this candidate if it has a stronger decisive signal than current best.
+            decisive = max(c_entail, c_contra)
+            prev_decisive = max(entail_score, contra_score)
+            if decisive > prev_decisive:
+                best_claim_candidate = candidate
+                entail_score = c_entail
+                contra_score = c_contra
+                best_entail = c_best_entail
+                best_contra = c_best_contra
+                best_any = c_best_any
+                n_entail = c_n_entail
+
+        extracted_claim = best_claim_candidate
+
+        # Consensus decision: the winner must dominate or be the only signal
+        total_decisive = entail_score + contra_score
+        entail_ratio = entail_score / total_decisive if total_decisive > 0 else 0.5
+
+        if (best_entail["conf"] >= entail_threshold and
+                (entail_ratio >= 0.55 or contra_score == 0.0)):
+            best = {"label": "ENTAILMENT", **best_entail}
+            # Small bonus per additional supporting piece of evidence (cap +5%)
+            confidence_boost = min(0.05, 0.012 * max(0, n_entail - 1))
+        elif (best_contra["conf"] >= contradict_threshold and
+                (entail_ratio <= 0.45 or entail_score == 0.0)):
+            best = {"label": "CONTRADICTION", **best_contra}
+        else:
+            best = best_any
 
         # 4) Decision policy
         if best["label"] == "ENTAILMENT" and best["conf"] >= entail_threshold:
             final_label = "REAL"
             verified = True
-            confidence = min(0.95, 0.60 + 0.35 * best["conf"] + 0.10 * best["semantic"])
+            confidence = min(0.95, 0.60 + 0.35 * best["conf"] + 0.10 * best["semantic"] + confidence_boost)
             explanation = "Trusted coverage supports the claim (entailment)."
         elif best["label"] == "CONTRADICTION" and best["conf"] >= contradict_threshold:
             final_label = "FAKE"
@@ -283,7 +372,7 @@ class TextClaimVerifier:
         else:
             final_label = "UNVERIFIED"
             verified = False
-            confidence = max(0.55, 0.50 + 0.25 * best["conf"] + 0.10 * best["semantic"])
+            confidence = max(0.55, 0.50 + 0.25 * best["conf"] + 0.10 * best.get("semantic", 0.0))
             explanation = "Trusted sources found, but they don't clearly support or refute the exact claim."
 
         # Build top_matches output
@@ -314,3 +403,31 @@ class TextClaimVerifier:
                 "best_semantic": round(float(best["semantic"]), 4),
             }
         }
+
+# ----------------------------
+# Global Instance for API
+# ----------------------------
+_verifier_lock = threading.Lock()
+_global_verifier: Optional[TextClaimVerifier] = None
+
+def get_text_verifier() -> TextClaimVerifier:
+    global _global_verifier
+    if _global_verifier is not None:
+        return _global_verifier
+        
+    with _verifier_lock:
+        if _global_verifier is None:
+            try:
+                _global_verifier = TextClaimVerifier()
+            except Exception as e:
+                print(f"Failed to initialize TextClaimVerifier: {e}")
+                raise
+        return _global_verifier
+
+def warmup_text_verifier() -> bool:
+    try:
+        get_text_verifier()
+        return True
+    except Exception:
+        return False
+

@@ -39,31 +39,24 @@ class _HomeScreenState extends State<HomeScreen> {
         index: _currentIndex,
         children: _screens,
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)
-          ],
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: _onNavTap,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: Colors.blue[700],
-          unselectedItemColor: Colors.grey[400],
-          showUnselectedLabels: true,
-          selectedFontSize: 12,
-          unselectedFontSize: 12,
-          elevation: 0,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(LucideIcons.home), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.barChart3), label: 'Analytics'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.history), label: 'History'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.bot), label: 'Chatbot'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.user), label: 'Profile'),
-          ],
-        ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: _onNavTap,
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: Colors.blue[700],
+        unselectedItemColor: Colors.grey[400],
+        showUnselectedLabels: true,
+        selectedFontSize: 12,
+        unselectedFontSize: 12,
+        elevation: 8,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(LucideIcons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(LucideIcons.barChart3), label: 'Analytics'),
+          BottomNavigationBarItem(icon: Icon(LucideIcons.history), label: 'History'),
+          BottomNavigationBarItem(icon: Icon(LucideIcons.bot), label: 'Chatbot'),
+          BottomNavigationBarItem(icon: Icon(LucideIcons.user), label: 'Profile'),
+        ],
       ),
     );
   }

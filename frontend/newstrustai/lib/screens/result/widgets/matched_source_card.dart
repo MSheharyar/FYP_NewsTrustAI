@@ -48,7 +48,7 @@ class MatchedSourceCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha:0.04),
             blurRadius: 14,
             offset: const Offset(0, 6),
           )
@@ -68,7 +68,7 @@ class MatchedSourceCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: typeColor.withOpacity(0.12),
+                  color: typeColor.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
@@ -80,7 +80,7 @@ class MatchedSourceCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: tagColor.withOpacity(0.12),
+                  color: tagColor.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
@@ -121,7 +121,7 @@ class MatchedSourceCard extends StatelessWidget {
               margin: const EdgeInsets.only(top: 8, bottom: 4),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
+                color: Colors.grey.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(

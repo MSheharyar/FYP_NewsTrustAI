@@ -1,29 +1,31 @@
+import logging
 import re
-from db.reader import safe_read_db
+from datetime import datetime, timezone
+from db.reader import safe_read_db, get_candidate_articles
 from services.matching import score_match
 from services.gdelt import gdelt_lookup_domains, CONF_VERY_LOW
-from services.factcheck import google_factcheck  # ✅ NEW
+from services.factcheck import google_factcheck
+from services.facts import facts_from_text, key_facts_guard
 from utils.text import clean_claim_text, normalize_text
+from text_verifier import looks_unstructured
 from config.settings import (
     VERIFY_THRESHOLD,
     CONF_HIGH,
     CONF_SLIGHTLY_LOW,
     CONF_LOW,
     MAIN_SOURCE_DOMAINS,
+    MIN_TEXT_LEN,
+    SOFT_CANDIDATE_TOPK,
+    BERT_SUGGEST_REAL_THRESHOLD,
+    BERT_SUSPECT_FAKE_THRESHOLD,
+    BERT_DISAGREEMENT_THRESHOLD,
+    STALE_THRESHOLD_DAYS,
 )
 
-# -----------------------------
-# Tuning (lightweight, no ML)
-# -----------------------------
-MIN_TEXT_LEN = 35
+logger = logging.getLogger(__name__)
 
-SOFT_CANDIDATE_TOPK = 30
 SOFT_MATCH_MIN = float(max(0.30, VERIFY_THRESHOLD * 0.70))
 SOFT_MATCH_STRONG = float(max(0.42, VERIFY_THRESHOLD * 0.85))
-
-REQUIRE_GROUP_MATCHES = 2
-MIN_GROUP_RATIO = 0.50
-HARD_GROUPS = {"numbers", "dates"}
 
 
 def _norm_domain(d: str) -> str:
@@ -37,26 +39,26 @@ def _norm_domain(d: str) -> str:
     return d
 
 
+# Precomputed once at import time — avoids rebuilding the set on every article.
+_MAIN_DOMAINS_NORM: frozenset = frozenset(_norm_domain(x) for x in MAIN_SOURCE_DOMAINS)
+
+
 def _is_main_source_domain(d: str) -> bool:
-    nd = _norm_domain(d)
-    return nd in {_norm_domain(x) for x in MAIN_SOURCE_DOMAINS}
+    return _norm_domain(d) in _MAIN_DOMAINS_NORM
 
 
-def _looks_unstructured(text: str) -> bool:
-    t = (text or "").strip()
-    if len(t) < MIN_TEXT_LEN:
-        return True
-
-    non_alnum = sum(1 for c in t if not c.isalnum() and c not in " .,:;!?-'\"()")
-    if non_alnum > 18:
-        return True
-
-    has_caps = bool(re.search(r"\b[A-Z][a-z]{2,}\b", t))
-    has_num = bool(re.search(r"\d", t))
-    if not has_caps and not has_num and len(t) < 120:
-        return True
-
-    return False
+def _article_age_days(art: dict):
+    """Return how many days old the article is, or None if date is missing/unparseable."""
+    pub = art.get("publishedAt") or art.get("scrapedAt") or ""
+    if not pub:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(pub).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).days
+    except (ValueError, TypeError):
+        return None
 
 
 def _evidence_blob(art: dict) -> str:
@@ -67,211 +69,89 @@ def _evidence_blob(art: dict) -> str:
     return blob[:3000]
 
 
-# -----------------------------
-# Key facts extraction (heuristics)
-# -----------------------------
-_MONTHS = {
-    "jan", "january", "feb", "february", "mar", "march", "apr", "april",
-    "may", "jun", "june", "jul", "july", "aug", "august",
-    "sep", "sept", "september", "oct", "october", "nov", "november",
-    "dec", "december",
-}
-
-_DAYS = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
-
-_ORG_TERMS = {
-    "pti", "pmln", "pml-n", "ppp", "mqm", "anp", "jui", "tjp",
-    "army", "pakistan army", "isi", "police", "nab", "fbr",
-    "supreme court", "high court", "atc", "election commission", "ecp",
-    "imf", "un", "who", "world bank", "al qaeda", "taliban",
-    "ary", "geo", "dawn", "bbc", "cnn", "aljazeera", "reuters", "ap",
-}
-
-_LOC_TERMS = {
-    "pakistan", "islamabad", "lahore", "karachi", "peshawar", "quetta", "multan", "faisalabad", "rawalpindi",
-    "sindh", "punjab", "kpk", "balochistan", "gilgit", "kashmir",
-    "uk", "england", "london", "manchester", "birmingham",
-    "usa", "united states", "washington", "new york",
-    "india", "delhi", "bangladesh", "afghanistan", "iran", "china", "saudi", "uae", "dubai", "doha",
-}
+def _append_reason(base: str, addition: str) -> str:
+    if not base:
+        return addition.strip()
+    base = base.strip()
+    addition = addition.strip()
+    if not addition:
+        return base
+    if base.endswith('.'):
+        return f"{base} {addition}"
+    return f"{base}. {addition}"
 
 
-def _extract_person_names(text: str):
-    t = (text or "").strip()
-    if not t:
-        return set()
+def _fuse_bert_with_hybrid(hybrid: dict, bert_res: dict) -> dict:
+    if not isinstance(hybrid, dict):
+        return hybrid
 
-    cands = re.findall(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){1,2}\b", t)
+    bert_label = (bert_res.get("label") or "").lower()
+    bert_confidence = float(bert_res.get("confidence") or 0.0)
+    probabilities = bert_res.get("probabilities") or {}
 
-    blacklist = {
-        "Prime Minister",
-        "Chief Minister",
-        "United States",
-        "United Kingdom",
-        "Supreme Court",
-        "High Court",
-        "Pakistan Tehreek",
-        "Tehreek E Insaf",
-        "Pakistan Tehreek E",
-        "Bank Alfalah",
-    }
+    hybrid = dict(hybrid)
+    hybrid["bert_label"] = bert_label or hybrid.get("bert_label")
+    hybrid["bert_confidence"] = bert_confidence or hybrid.get("bert_confidence")
+    hybrid["probabilities"] = probabilities
+    hybrid["bert_note"] = bert_res.get("note") or hybrid.get("bert_note")
+    hybrid["model_disagreement"] = hybrid.get("model_disagreement", False)
 
-    out = set()
-    for c in cands:
-        c2 = c.strip()
-        if c2 in blacklist:
-            continue
-        out.add(c2)
-    return out
+    if bert_label not in {"fake", "real"} or bert_confidence <= 0.0:
+        return hybrid
 
+    final_label = (hybrid.get("final_label") or "").lower()
 
-def _extract_numbers(text: str):
-    t = (text or "").strip()
-    if not t:
-        return set()
-    nums = re.findall(r"\b\d{1,4}\b", t)
-    return set(nums)
+    if final_label == "unverified":
+        if bert_label == "fake" and bert_confidence >= BERT_SUSPECT_FAKE_THRESHOLD:
+            hybrid.update({
+                "final_label": "fake",
+                "final_confidence": float(CONF_LOW),
+                "authenticity": "fake",
+                "confidence": float(CONF_LOW),
+                "verdict_state": "model_suspected_fake",
+                "verification_method": "bert_only",
+                "final_reason": _append_reason(
+                    hybrid.get("final_reason", ""),
+                    f"No strong external evidence was found, but the model predicts this claim is fake with {bert_confidence:.0%} confidence."
+                ),
+            })
+        elif bert_label == "real" and bert_confidence >= BERT_SUGGEST_REAL_THRESHOLD:
+            hybrid.update({
+                "final_reason": _append_reason(
+                    hybrid.get("final_reason", ""),
+                    f"No strong external evidence was found. The model suggests this claim is real with {bert_confidence:.0%} confidence."
+                ),
+                "verification_method": "bert_suggested_real",
+            })
+        return hybrid
 
+    if final_label == "real":
+        if bert_label == "fake" and bert_confidence >= BERT_DISAGREEMENT_THRESHOLD:
+            hybrid["model_disagreement"] = True
+            hybrid["verification_method"] = "db_and_bert_conflict"
+            hybrid["final_reason"] = _append_reason(
+                hybrid.get("final_reason", ""),
+                "A separate model check strongly disagrees and flags this claim as suspicious."
+            )
+        else:
+            hybrid["verification_method"] = "db_and_bert"
+        return hybrid
 
-def _extract_dates(text: str):
-    t = normalize_text(text).lower()
-    tokens = set()
-    words = re.findall(r"[a-z]+|\d{1,4}", t)
+    if final_label == "fake":
+        if bert_label == "real" and bert_confidence >= BERT_DISAGREEMENT_THRESHOLD:
+            hybrid["model_disagreement"] = True
+            hybrid["verification_method"] = "factcheck_and_bert_conflict"
+            hybrid["final_reason"] = _append_reason(
+                hybrid.get("final_reason", ""),
+                "A separate model check suggests the claim may be real."
+            )
+        else:
+            hybrid["verification_method"] = "factcheck_and_bert"
+        return hybrid
 
-    for i, w in enumerate(words):
-        if w in _MONTHS:
-            tokens.add(w)
-            if i + 1 < len(words) and words[i + 1].isdigit():
-                tokens.add(f"{w} {words[i+1]}")
-        if w in _DAYS:
-            tokens.add(w)
-        if w.isdigit() and len(w) == 4 and (1900 <= int(w) <= 2100):
-            tokens.add(w)
-
-    pairs = re.findall(
-        r"\b(\d{1,2})\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b",
-        t,
-    )
-    for d, m in pairs:
-        tokens.add(m)
-        tokens.add(f"{m} {d}")
-
-    return tokens
-
-
-def _extract_locations(text: str):
-    t = normalize_text(text).lower()
-    out = set()
-    for loc in _LOC_TERMS:
-        if loc in t:
-            out.add(loc)
-    return out
-
-
-def _extract_orgs(text: str):
-    t = normalize_text(text).lower()
-    out = set()
-    for org in _ORG_TERMS:
-        if org in t:
-            out.add(org)
-    return out
+    return hybrid
 
 
-def _facts_from_text(text: str):
-    return {
-        "persons": _extract_person_names(text),
-        "locations": _extract_locations(text),
-        "dates": _extract_dates(text),
-        "numbers": _extract_numbers(text),
-        "orgs": _extract_orgs(text),
-    }
-
-
-def _match_set_ratio(claim_set, evidence_text_lower: str):
-    if not claim_set:
-        return set(), 1.0
-
-    matched = set()
-    for item in claim_set:
-        if item.lower() in evidence_text_lower:
-            matched.add(item)
-
-    ratio = len(matched) / max(1, len(claim_set))
-    return matched, float(ratio)
-
-
-def _key_facts_guard(claim_text: str, evidence_text: str):
-    claim_f = _facts_from_text(claim_text)
-    ev_lower = (normalize_text(evidence_text) or "").lower()
-
-    debug = {"claim": {}, "matched": {}, "ratios": {}, "groups_present": [], "groups_matched": []}
-
-    groups_present = []
-    groups_matched = []
-
-    # persons
-    if claim_f["persons"]:
-        groups_present.append("persons")
-        m, r = _match_set_ratio(claim_f["persons"], ev_lower)
-        debug["claim"]["persons"] = sorted(claim_f["persons"])
-        debug["matched"]["persons"] = sorted(m)
-        debug["ratios"]["persons"] = r
-        if len(m) >= 1 and (r >= MIN_GROUP_RATIO or len(claim_f["persons"]) == 1):
-            groups_matched.append("persons")
-
-    # locations
-    if claim_f["locations"]:
-        groups_present.append("locations")
-        m, r = _match_set_ratio(claim_f["locations"], ev_lower)
-        debug["claim"]["locations"] = sorted(claim_f["locations"])
-        debug["matched"]["locations"] = sorted(m)
-        debug["ratios"]["locations"] = r
-        if len(m) >= 1:
-            groups_matched.append("locations")
-
-    # dates
-    if claim_f["dates"]:
-        groups_present.append("dates")
-        m, r = _match_set_ratio(claim_f["dates"], ev_lower)
-        debug["claim"]["dates"] = sorted(claim_f["dates"])
-        debug["matched"]["dates"] = sorted(m)
-        debug["ratios"]["dates"] = r
-        if len(m) >= 1:
-            groups_matched.append("dates")
-
-    # numbers
-    if claim_f["numbers"]:
-        groups_present.append("numbers")
-        m, r = _match_set_ratio(claim_f["numbers"], ev_lower)
-        debug["claim"]["numbers"] = sorted(claim_f["numbers"])
-        debug["matched"]["numbers"] = sorted(m)
-        debug["ratios"]["numbers"] = r
-        if len(m) >= 1:
-            groups_matched.append("numbers")
-
-    # orgs
-    if claim_f["orgs"]:
-        groups_present.append("orgs")
-        m, r = _match_set_ratio(claim_f["orgs"], ev_lower)
-        debug["claim"]["orgs"] = sorted(claim_f["orgs"])
-        debug["matched"]["orgs"] = sorted(m)
-        debug["ratios"]["orgs"] = r
-        if len(m) >= 1 and (r >= MIN_GROUP_RATIO or len(claim_f["orgs"]) == 1):
-            groups_matched.append("orgs")
-
-    debug["groups_present"] = groups_present
-    debug["groups_matched"] = groups_matched
-
-    if not groups_present:
-        return True, debug
-
-    for g in HARD_GROUPS:
-        if g in groups_present and g not in groups_matched:
-            debug["hard_mismatch"] = g
-            return False, debug
-
-    ok = len(groups_matched) >= min(REQUIRE_GROUP_MATCHES, len(groups_present))
-    return ok, debug
 
 
 # -----------------------------
@@ -383,7 +263,7 @@ def hybrid_decision(text: str, source_domain: str = ""):
     claim = normalize_text(clean_claim_text(text)).lower()
     query_used = claim
 
-    if _looks_unstructured(text):
+    if looks_unstructured(text):
         return {
             "error": False,
             "final_label": "unverified",
@@ -408,11 +288,23 @@ def hybrid_decision(text: str, source_domain: str = ""):
             "main_support_domains": [],
         }
 
-    db = safe_read_db()
+    # Use the keyword index to pre-filter candidates instead of scanning the full DB
+    claim_keywords = re.findall(r'\b[a-z]{4,}\b', claim.lower())
+    candidates = get_candidate_articles(claim_keywords) if claim_keywords else safe_read_db()
+
+    # Lazy fact extraction — spaCy NER is expensive; compute once and reuse
+    # for both key_facts_guard calls and the GDELT entity guard.
+    _claim_facts_cache: list = [None]
+
+    def _get_claim_facts():
+        if _claim_facts_cache[0] is None:
+            _claim_facts_cache[0] = facts_from_text(text)
+        return _claim_facts_cache[0]
+
     matches = []
     soft_candidates = []
 
-    for art in db:
+    for art in candidates:
         title = normalize_text(art.get("title", "")).lower()
         summary = normalize_text(art.get("summary", "")).lower()
         body = normalize_text(art.get("body", "")).lower()
@@ -469,7 +361,7 @@ def hybrid_decision(text: str, source_domain: str = ""):
             ev_text = _evidence_blob(best_art)
 
             if best_score >= SOFT_MATCH_STRONG:
-                ok_facts, fact_dbg = _key_facts_guard(text, ev_text)
+                ok_facts, fact_dbg = key_facts_guard(text, ev_text, claim_facts=_get_claim_facts())
                 if not ok_facts:
                     return {
                         **base_response,
@@ -516,6 +408,18 @@ def hybrid_decision(text: str, source_domain: str = ""):
                 }
 
             conf = float(CONF_SLIGHTLY_LOW if trusted else CONF_LOW)
+            soft_reason = "Likely match: similar coverage found (paraphrase-tolerant)."
+
+            # Staleness check for soft match
+            soft_age = _article_age_days(best_art)
+            soft_stale = soft_age is not None and soft_age > STALE_THRESHOLD_DAYS
+            if soft_stale:
+                soft_reason += (
+                    f" Note: the matched article is ~{soft_age // 30} months old"
+                    " — the current situation may have changed."
+                )
+                conf = max(conf - 7.0, float(CONF_LOW))
+
             return {
                 **base_response,
                 "final_label": "real",
@@ -525,7 +429,9 @@ def hybrid_decision(text: str, source_domain: str = ""):
                 "verdict_state": "verified_real",
                 "verification_method": "soft_db_match",
                 "source_tier": ("main" if trusted else "other"),
-                "final_reason": "Likely match: similar coverage found (paraphrase-tolerant).",
+                "final_reason": soft_reason,
+                "stale_evidence": soft_stale,
+                "evidence_age_days": soft_age,
                 "matched_sources": [
                     {
                         "source": best_art.get("source") or best_art.get("sourceName") or "",
@@ -545,7 +451,7 @@ def hybrid_decision(text: str, source_domain: str = ""):
     # 3) STRONG DB EVIDENCE -> REAL (also guard facts)
     if has_any_evidence:
         top_ev = _evidence_blob(matches[0][1])
-        ok_facts, fact_dbg = _key_facts_guard(text, top_ev)
+        ok_facts, fact_dbg = key_facts_guard(text, top_ev, claim_facts=_get_claim_facts())
 
         if not ok_facts:
             return {
@@ -589,6 +495,16 @@ def hybrid_decision(text: str, source_domain: str = ""):
             reason = "Verified: corroborated by other news sources."
             tier = "other"
 
+        # Staleness check: downgrade confidence if best evidence is over 18 months old
+        age_days = _article_age_days(matches[0][1])
+        stale_evidence = age_days is not None and age_days > STALE_THRESHOLD_DAYS
+        if stale_evidence:
+            reason += (
+                f" Note: the matched article is ~{age_days // 30} months old"
+                " — the current situation may have changed."
+            )
+            conf = max(conf - 7.0, float(CONF_LOW))
+
         return {
             **base_response,
             "final_label": "real",
@@ -602,6 +518,8 @@ def hybrid_decision(text: str, source_domain: str = ""):
             "main_support_count": ms,
             "main_support_domains": list(main_domains),
             "matches_found": len(matches),
+            "stale_evidence": stale_evidence,
+            "evidence_age_days": age_days,
             "matched_sources": [
                 {
                     "source": a.get("source") or a.get("sourceName") or "",
@@ -677,16 +595,24 @@ def hybrid_decision(text: str, source_domain: str = ""):
             }
 
     # -----------------------------
-    # 4) NO DB -> LIVE GDELT LOOKUP (with safeguard)
+    # 4) NO DB -> LIVE GDELT LOOKUP
     # -----------------------------
-    claim_f = _facts_from_text(text)
-    if claim_f["persons"] or claim_f["locations"] or claim_f["dates"] or claim_f["numbers"] or claim_f["orgs"]:
+    # GDELT is a live news domain-coverage check — most useful for entity-rich
+    # recent claims (persons, locations, orgs) where DB evidence is absent.
+    # Run it for all claims that reach this point; skip only if the claim is
+    # completely entity-free (likely too vague to get a meaningful GDELT signal).
+    claim_f = _get_claim_facts()
+    has_entities = bool(
+        claim_f["persons"] or claim_f["locations"] or claim_f["dates"]
+        or claim_f["numbers"] or claim_f["orgs"] or claim_f.get("actions")
+    )
+    if not has_entities:
         return {
             **base_response,
             "verification_method": "no_text_evidence",
             "final_reason": (
-                "No strong text evidence found for the exact claim. "
-                "Only domain-level live signals are available, so we won't verify this."
+                "No strong text evidence found. The claim contains no named entities "
+                "or facts that can be looked up in live news sources."
             ),
         }
 

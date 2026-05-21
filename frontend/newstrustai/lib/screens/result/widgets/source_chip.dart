@@ -8,7 +8,7 @@ class SourceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = active ? Colors.green.withOpacity(0.12) : Colors.grey.withOpacity(0.12);
+    final bg = active ? Colors.green.withValues(alpha:0.12) : Colors.grey.withValues(alpha:0.12);
     final fg = active ? Colors.green[700] : Colors.grey[700];
 
     return Container(

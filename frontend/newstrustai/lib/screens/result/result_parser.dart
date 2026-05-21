@@ -100,7 +100,8 @@ ResultViewModel parseResultData(
 
   final bool isReal = label == "real" || label == "verified" || label == "true";
   final bool isFake = label == "fake" || label == "false";
-  final bool isUnverified = !isReal && !isFake;
+  final bool isMixed = label == "mixed";
+  final bool isUnverified = !isReal && !isFake && !isMixed;
 
   String verdictTitle;
   String badgeText;
@@ -118,36 +119,78 @@ ResultViewModel parseResultData(
     verdictTitle = "Fake / Misleading";
     badgeText = "Fake";
     verdictSubtitle = "Evidence suggests this claim is not reliable.";
+  } else if (isMixed) {
+    verdictTitle = "Disputed / Mixed Signals";
+    badgeText = "Mixed";
+    verdictSubtitle = "Fact-checkers have reached conflicting conclusions on this claim.";
   } else {
     verdictTitle = "Unverified (Insufficient Evidence)";
     badgeText = "Unverified";
     verdictSubtitle = "We couldn’t confirm this claim with strong evidence.";
   }
 
-  final String backendReason = _safeStr(data["final_reason"], "").trim();
-  String reasonText = backendReason.isNotEmpty
-      ? backendReason
-      : (method == "edited_claim_suspected"
-          ? "We found similar articles, but key facts (person/place/date/number/org) don’t match."
-          : (isReal
-              ? "We found matching reporting from credible sources."
-              : isFake
-                  ? "We found signals that contradict or discredit the claim."
-                  : "We found similar coverage, but not enough strong evidence to verify."));
+  final String detectedLanguage =
+      _safeStr(data["detected_language"], "english").toLowerCase().trim();
 
-  String whatCheckedText =
-      "We searched our trusted database and performed a live source lookup for similar coverage.";
+  final bool staleEvidence = _isTrue(data["stale_evidence"]);
+  final int? evidenceAgeDays = (data["evidence_age_days"] is num)
+      ? (data["evidence_age_days"] as num).toInt()
+      : null;
+  final bool nliConfirmed = _isTrue(data["nli_confirmed"]);
+  final String? bertNote = (data["bert_note"] is String && (data["bert_note"] as String).isNotEmpty)
+      ? data["bert_note"] as String
+      : null;
+
+  final String backendReason = _safeStr(data["final_reason"], "").trim();
+  final String explanationText = _safeStr(data["explanation_text"], "").trim();
+  final String bertLabel = _safeStr(data["bert_label"], _safeStr(data["label"], "")).toLowerCase().trim();
+  final double? bertConfidence = _toDouble(data["bert_confidence"] ?? data["confidence"]);
+  final bool modelDisagreement = _isTrue(data["model_disagreement"]);
+
+  String reasonText = explanationText.isNotEmpty
+      ? explanationText
+      : backendReason.isNotEmpty
+          ? backendReason
+          : (method == "edited_claim_suspected"
+              ? "We found similar articles, but key facts (person/place/date/number/org) don’t match."
+              : (isReal
+                  ? "We found matching reporting from credible sources."
+                  : isFake
+                      ? "We found signals that contradict or discredit the claim."
+                      : "We found similar coverage, but not enough strong evidence to verify."));
+
+  String whatCheckedText = "Verification process:\n\n";
 
   if (method == "input_too_vague") {
-    whatCheckedText = "We couldn’t verify because the input text was too incomplete or unclear.";
+    whatCheckedText = "Input validation: The text was too incomplete or unclear to verify reliably.";
   } else if (method == "db_match" || method == "soft_db_match" || method == "weak_similar_coverage") {
-    whatCheckedText = "We compared your claim against our news database and looked for matching coverage.";
+    whatCheckedText += "• Database search: Compared claim against stored news articles for matching coverage.\n";
+    whatCheckedText += "• Fact extraction: Analyzed key facts (persons, places, dates) for consistency.\n";
   } else if (method.startsWith("gdelt")) {
-    whatCheckedText = "We performed a live lookup across major news domains for similar coverage.";
+    whatCheckedText += "• Live lookup: Searched major news domains in real-time for similar coverage.\n";
+    whatCheckedText += "• Domain reputation: Prioritized results from trusted news sources.\n";
   } else if (method == "google_factcheck") {
-    whatCheckedText = "We searched published fact-check databases for the same claim and reviewed ratings.";
+    whatCheckedText += "• Fact-check API: Queried published fact-check databases for the claim.\n";
+    whatCheckedText += "• Rating analysis: Reviewed fact-checker ratings and evidence.\n";
   } else if (method == "edited_claim_suspected") {
-    whatCheckedText = "We found related coverage but detected mismatched key facts, so we did not verify it.";
+    whatCheckedText += "• Database search: Found related coverage but detected key fact mismatches.\n";
+    whatCheckedText += "• Fact validation: Rejected verification due to potential claim alteration.\n";
+  } else if (method == "bert_only") {
+    whatCheckedText += "• Model prediction: No strong external evidence found, used AI model analysis.\n";
+  } else {
+    whatCheckedText += "• Multi-source check: Combined database, live lookup, and fact-check evidence.\n";
+  }
+
+  if (bertLabel.isNotEmpty && method != "bert_only") {
+    final String modelLabelText = bertLabel == "fake" ? "Fake/Misleading" : "Real";
+    final String modelText = bertConfidence != null
+        ? "• Model analysis: Predicted '$modelLabelText' with ${bertConfidence.toStringAsFixed(0)}% confidence."
+        : "• Model analysis: Provided additional prediction '$modelLabelText'.";
+    whatCheckedText += "\n$modelText";
+  }
+
+  if (modelDisagreement) {
+    whatCheckedText += "\n\n⚠️ Model disagreement: The AI model result differs from evidence-based verdict - requires careful review.";
   }
 
   final tips = <String>[
@@ -177,9 +220,19 @@ ResultViewModel parseResultData(
     linkDomain: linkDomain,
     queryUsed: q,
     sources: sources,
+    explanationText: explanationText,
+    bertLabel: bertLabel,
+    bertConfidence: bertConfidence,
+    modelDisagreement: modelDisagreement,
     factsDebug: factsDebug,
     isReal: isReal,
     isFake: isFake,
+    isMixed: isMixed,
     isUnverified: isUnverified,
+    detectedLanguage: detectedLanguage,
+    staleEvidence: staleEvidence,
+    evidenceAgeDays: evidenceAgeDays,
+    nliConfirmed: nliConfirmed,
+    bertNote: bertNote,
   );
 }
