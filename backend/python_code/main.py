@@ -41,9 +41,8 @@ def _init_firebase() -> None:
             firebase_admin.initialize_app(cred)
             logger.info("Firebase Admin SDK initialised from FIREBASE_SERVICE_ACCOUNT_JSON.")
         else:
-            # Falls back to GOOGLE_APPLICATION_CREDENTIALS env var or ADC
-            firebase_admin.initialize_app()
-            logger.info("Firebase Admin SDK initialised from Application Default Credentials.")
+            firebase_admin.initialize_app(options={"projectId": "newstrust-fall"})
+            logger.info("Firebase Admin SDK initialised with project ID: newstrust-fall")
     except Exception as e:
         logger.warning(
             "Firebase Admin SDK init failed — token verification will be skipped: %s", e
@@ -62,7 +61,11 @@ async def lifespan(_app: FastAPI):
 
     try:
         from services.bert import warmup_bert
-        warmup_bert()
+        bert_status = warmup_bert()
+        if bert_status.get("ok"):
+            logger.info("BERT model loaded: %s", bert_status.get("note"))
+        else:
+            logger.warning("BERT model not loaded: %s", bert_status.get("note"))
 
         if HF_API_TOKEN:
             logger.info("Urdu model ready: %s (HuggingFace API)", URDU_MODEL_ID)
@@ -94,7 +97,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     message = detail if isinstance(detail, str) else "Request failed"
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": True, "message": message, "detail": detail},
+        content={"error": True, "message": message},
     )
 
 @app.exception_handler(RequestValidationError)
@@ -108,7 +111,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             msg = m.strip()
     return JSONResponse(
         status_code=422,
-        content={"error": True, "message": msg, "detail": errors},
+        content={"error": True, "message": msg},
     )
 
 @app.exception_handler(Exception)

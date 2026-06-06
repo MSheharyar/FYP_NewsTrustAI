@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from db.reader import safe_read_db
+from routes.verify import limiter
 
 def _pick_first(it: dict, keys: list[str]) -> str:
     for k in keys:
@@ -41,7 +42,8 @@ def normalize_item(it: dict) -> dict:
 router = APIRouter()
 
 @router.get("/trending")
-def trending():
+@limiter.limit("30/minute")
+def trending(request: Request):
     items = safe_read_db()
     if not items:
         return {"items": []}

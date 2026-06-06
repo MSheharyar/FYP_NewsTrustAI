@@ -42,6 +42,10 @@ def _get_client() -> genai.Client:
     return _client
 
 
+_GEMINI_MODEL = "gemini-2.5-flash"
+_MAX_RETRIES = 3
+
+
 def chat_with_gemini(
     message: str,
     history: list[dict],
@@ -63,17 +67,18 @@ def chat_with_gemini(
             )
 
     chat_session = client.chats.create(
-        model="gemini-2.5-flash",
+        model=_GEMINI_MODEL,
         history=history_contents,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_PROMPT,
+            max_output_tokens=600,
         ),
     )
 
-    parts: list[str] = []
+    msg_parts: list[str] = []
 
     if context and context.strip():
-        parts.append(f"[Verification Context]\n{context.strip()}")
+        msg_parts.append(f"[Verification Context]\n{context.strip()}")
 
     if db_articles:
         lines = ["[Relevant Articles from NewsTrustAI Database]"]
@@ -84,11 +89,31 @@ def chat_with_gemini(
                 f"\n   URL: {art.get('url') or 'N/A'}"
                 f"\n   Excerpt: {art.get('snippet') or ''}"
             )
-        parts.append("\n".join(lines))
+        msg_parts.append("\n".join(lines))
 
-    parts.append(f"[User Question]\n{message}")
+    msg_parts.append(f"[User Question]\n{message}")
 
-    user_input = "\n\n".join(parts)
+    user_input = "\n\n".join(msg_parts)
 
-    response = chat_session.send_message(user_input)
-    return response.text
+    import time as _time
+    last_exc = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            response = chat_session.send_message(user_input)
+            text = response.text
+            if not text or not text.strip():
+                raise RuntimeError("Gemini returned an empty response.")
+            return text
+        except Exception as exc:
+            last_exc = exc
+            exc_str = str(exc)
+            # Retry on quota / rate-limit errors with backoff
+            if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+                wait = 25 * attempt
+                logger.warning("Gemini 429 on attempt %d/%d — retrying in %ds", attempt, _MAX_RETRIES, wait)
+                _time.sleep(wait)
+                continue
+            logger.error("Gemini send_message failed (%s): %s", type(exc).__name__, exc)
+            raise
+    logger.error("Gemini exhausted %d retries: %s", _MAX_RETRIES, last_exc)
+    raise last_exc

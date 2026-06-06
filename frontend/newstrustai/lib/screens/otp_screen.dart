@@ -25,6 +25,9 @@ class _OtpScreenState extends State<OtpScreen> {
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
   bool _isLoading = false;
 
+  static const _blue = Color(0xFF1565C0);
+  static const _indigo = Color(0xFF283593);
+
   @override
   void dispose() {
     for (final c in _controllers) { c.dispose(); }
@@ -87,10 +90,10 @@ class _OtpScreenState extends State<OtpScreen> {
     }
   }
 
-  Widget _buildOtpBox(int index) {
+  Widget _otpBox(int index) {
     return SizedBox(
-      width: 45,
-      height: 55,
+      width: 46,
+      height: 56,
       child: TextField(
         controller: _controllers[index],
         focusNode: _focusNodes[index],
@@ -98,18 +101,27 @@ class _OtpScreenState extends State<OtpScreen> {
         textAlign: TextAlign.center,
         maxLength: 1,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          color: Colors.black87,
+        ),
         decoration: InputDecoration(
           counterText: '',
           filled: true,
-          fillColor: Colors.grey.shade100,
+          fillColor: const Color(0xFFF5F7FA),
+          contentPadding: EdgeInsets.zero,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: Colors.grey.shade200),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: Colors.grey.shade200),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Colors.blue, width: 2),
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: _blue, width: 2),
           ),
         ),
         onChanged: (value) {
@@ -125,72 +137,189 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Mask phone: show last 4 digits only (e.g. +92 *** *** 1234)
+    final phone = widget.phoneNumber;
+    final masked = phone.length > 4
+        ? '${phone.substring(0, phone.length - 4).replaceAll(RegExp(r'\d'), '*')}${phone.substring(phone.length - 4)}'
+        : phone;
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Enter OTP',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'We sent a 6-digit code to ${widget.phoneNumber}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 14,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(6, _buildOtpBox),
-                    ),
-                    const SizedBox(height: 40),
-                    GestureDetector(
-                      onTap: _verify,
-                      child: Container(
-                        width: double.infinity,
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text(
-                          'Verify',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+      resizeToAvoidBottomInset: true,
+      body: Stack(
+        children: [
+          // Gradient background
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF1565C0), Color(0xFF283593)],
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: _isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Colors.white))
+                : SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        // Header
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
+                          child: Column(
+                            children: [
+                              // Back button
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: GestureDetector(
+                                  onTap: () => Navigator.pop(context),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(Icons.arrow_back_rounded,
+                                        color: Colors.white, size: 20),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+
+                              // Phone icon in circle
+                              Container(
+                                width: 72,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.15),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.sms_outlined,
+                                  color: Colors.white,
+                                  size: 34,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              const Text(
+                                'Verify OTP',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Code sent to $masked',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.white.withValues(alpha: 0.75),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
+
+                        // White card
+                        Container(
+                          width: double.infinity,
+                          constraints: BoxConstraints(
+                            minHeight: MediaQuery.of(context).size.height * 0.52,
+                          ),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(32),
+                              topRight: Radius.circular(32),
+                            ),
+                          ),
+                          padding: const EdgeInsets.fromLTRB(24, 36, 24, 40),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              const Text(
+                                'Enter 6-digit code',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Check your SMS and enter the code below.',
+                                style: TextStyle(
+                                    fontSize: 13, color: Colors.grey.shade500),
+                              ),
+                              const SizedBox(height: 32),
+
+                              // OTP boxes
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: List.generate(6, _otpBox),
+                              ),
+                              const SizedBox(height: 36),
+
+                              // Verify button
+                              GestureDetector(
+                                onTap: _verify,
+                                child: Container(
+                                  width: double.infinity,
+                                  alignment: Alignment.center,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 15),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [_blue, _indigo],
+                                      begin: Alignment.centerLeft,
+                                      end: Alignment.centerRight,
+                                    ),
+                                    borderRadius: BorderRadius.circular(14),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _blue.withValues(alpha: 0.35),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 5),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Text(
+                                    'Verify & Continue',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 15,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+
+                              // Resend hint
+                              Text(
+                                'Didn\'t receive the code? Check your SMS or go back and try again.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade400,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
+                  ),
+          ),
+        ],
       ),
     );
   }

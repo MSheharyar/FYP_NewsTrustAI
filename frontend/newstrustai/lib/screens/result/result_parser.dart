@@ -92,7 +92,7 @@ ResultViewModel parseResultData(
     conf = _toDouble(data["confidence"]);
   }
 
-  // ✅ If method says edited claim suspected, force it into "unverified" UI state
+  // edited_claim_suspected — keep as unverified in UI (backend returns unverified)
   if (method == "edited_claim_suspected") {
     label = "unverified";
     conf = conf ?? _toDouble(data["final_confidence"]) ?? _toDouble(data["confidence"]);
@@ -110,7 +110,15 @@ ResultViewModel parseResultData(
   if (method == "edited_claim_suspected") {
     verdictTitle = "Not Verified";
     badgeText = "Unverified";
-    verdictSubtitle = "Edited / altered claim suspected.";
+    verdictSubtitle = "Edited / altered claim suspected — key facts don't match known coverage.";
+  } else if (isReal && method == "soft_db_match") {
+    verdictTitle = "Likely Real";
+    badgeText = "Likely Real";
+    verdictSubtitle = "Similar coverage found, but not a strong direct match — treat with some caution.";
+  } else if (isReal && method == "weak_similar_coverage") {
+    verdictTitle = "Possibly Real";
+    badgeText = "Unconfirmed";
+    verdictSubtitle = "Weak related coverage found — insufficient to confirm.";
   } else if (isReal) {
     verdictTitle = "Verified";
     badgeText = "Verified";
@@ -144,7 +152,10 @@ ResultViewModel parseResultData(
   final String backendReason = _safeStr(data["final_reason"], "").trim();
   final String explanationText = _safeStr(data["explanation_text"], "").trim();
   final String bertLabel = _safeStr(data["bert_label"], _safeStr(data["label"], "")).toLowerCase().trim();
-  final double? bertConfidence = _toDouble(data["bert_confidence"] ?? data["confidence"]);
+  // Backend sends bert_confidence as 0–1 float; convert to 0–100 for display.
+  double? rawBertConf = _toDouble(data["bert_confidence"] ?? data["confidence"]);
+  if (rawBertConf != null && rawBertConf <= 1.0) rawBertConf = rawBertConf * 100.0;
+  final double? bertConfidence = rawBertConf;
   final bool modelDisagreement = _isTrue(data["model_disagreement"]);
 
   String reasonText = explanationText.isNotEmpty

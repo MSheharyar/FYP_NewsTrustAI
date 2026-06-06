@@ -9,9 +9,12 @@ class MatchedSourceCard extends StatelessWidget {
 
   Future<void> _open(String url) async {
     final u = Uri.tryParse(url.trim());
-    if (u == null) return;
-    if (!await canLaunchUrl(u)) return;
-    await launchUrl(u, mode: LaunchMode.externalApplication);
+    if (u == null || !u.hasScheme) return;
+    try {
+      await launchUrl(u, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      await launchUrl(u, mode: LaunchMode.inAppBrowserView);
+    }
   }
 
   String _typeLabel() {

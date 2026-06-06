@@ -169,9 +169,12 @@ class _ResultScreenState extends State<ResultScreen> {
 
   Future<void> _open(String url) async {
     final u = Uri.tryParse(url.trim());
-    if (u == null) return;
-    if (!await canLaunchUrl(u)) return;
-    await launchUrl(u, mode: LaunchMode.externalApplication);
+    if (u == null || !u.hasScheme) return;
+    try {
+      await launchUrl(u, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      await launchUrl(u, mode: LaunchMode.inAppBrowserView);
+    }
   }
 
   @override
@@ -450,6 +453,8 @@ class _ResultScreenState extends State<ResultScreen> {
         return "Input was too vague to verify";
       case "bert_only":
         return "Model-only prediction";
+      case "bert_suggested_real":
+        return "AI model suggests real (low confidence)";
       case "db_and_bert":
         return "Database evidence with model validation";
       case "factcheck_and_bert":
@@ -465,14 +470,24 @@ class _ResultScreenState extends State<ResultScreen> {
   Widget _buildModelEvidenceCard(ResultViewModel vm) {
     final bool hasModel = vm.bertLabel.isNotEmpty;
     final bool isFake = vm.bertLabel == "fake";
+    // When evidence wins (isReal) but model flagged fake, soften the display
+    final bool evidenceOverride = vm.modelDisagreement && vm.isReal;
     final String evidenceType = _prettyMethodName(vm.method);
-    final String predictionText = hasModel ? (isFake ? "Fake / Misleading" : "Real") : "Not used";
+    final String predictionText = hasModel
+        ? (isFake
+            ? (evidenceOverride ? "Flagged (overridden by evidence)" : "Fake / Misleading")
+            : "Real")
+        : "Not used";
     final String consensusText = vm.modelDisagreement
-        ? "Evidence and model disagree. This result requires careful review."
+        ? (evidenceOverride
+            ? "Evidence from trusted sources overrides the model flag. Verdict stands as Verified."
+            : "Evidence and model disagree. This result requires careful review.")
         : hasModel
-            ? "Evidence and model are aligned." 
+            ? "Evidence and model are aligned."
             : "Model prediction was not available.";
-    final Color titleColor = vm.modelDisagreement ? Colors.orange[800]! : Colors.blueGrey[900]!;
+    final Color titleColor = vm.modelDisagreement
+        ? (evidenceOverride ? Colors.blueGrey[700]! : Colors.orange[800]!)
+        : Colors.blueGrey[900]!;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -505,8 +520,8 @@ class _ResultScreenState extends State<ResultScreen> {
               "Model signal: $predictionText",
               style: TextStyle(fontWeight: FontWeight.w700, color: titleColor),
             ),
-            const SizedBox(height: 12),
-            if (vm.bertConfidence != null) ...[
+            if (!evidenceOverride && vm.bertConfidence != null) ...[
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Text(

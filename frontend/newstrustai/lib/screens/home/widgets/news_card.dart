@@ -17,7 +17,7 @@ class NewsCard extends StatelessWidget {
     final String? imageUrl = ApiService.resolveNewsImageUrl(map);
 
     return Container(
-      margin: const EdgeInsets.only(right: 16, bottom: 10),
+      margin: const EdgeInsets.only(right: 16, bottom: 4),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -36,7 +36,7 @@ class NewsCard extends StatelessWidget {
           Expanded(
             flex: 4,
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

@@ -133,7 +133,7 @@ class _HomeTabState extends State<HomeTab> {
     if (_newsArticles.isEmpty) return const Center(child: Text("No news available"));
 
     return SizedBox(
-      height: 270,
+      height: 320,
       child: PageView.builder(
         controller: PageController(viewportFraction: 0.88),
         padEnds: false,

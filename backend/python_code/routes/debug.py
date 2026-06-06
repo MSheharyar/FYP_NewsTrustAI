@@ -1,12 +1,13 @@
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from db.reader import safe_read_db
+from middleware.auth import require_firebase_auth
 
 router = APIRouter()
 
 @router.get("/debug-db")
-def debug_db():
+def debug_db(user: dict = Depends(require_firebase_auth)):
     if os.getenv("DEBUG", "").lower() not in ("1", "true", "yes"):
         raise HTTPException(status_code=404, detail="Not found")
 

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # 300 samples was the original default but causes ~30 s on CPU (300 BERT calls).
 # 100 is stable enough for top-5 word highlights and cuts latency by 3×.
 # Override with LIME_NUM_SAMPLES env var if needed.
-_NUM_SAMPLES = int(os.getenv("LIME_NUM_SAMPLES", "100"))
+_NUM_SAMPLES = int(os.getenv("LIME_NUM_SAMPLES", "50"))
 
 # Initialize explainer (Index 0 = 'fake', Index 1 = 'real')
 explainer = LimeTextExplainer(class_names=['fake', 'real'])

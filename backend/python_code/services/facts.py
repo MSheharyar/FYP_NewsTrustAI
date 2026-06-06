@@ -170,11 +170,12 @@ def extract_numbers(text: str) -> set:
     t = (text or "").strip()
     if not t:
         return set()
-    # Bare numbers (1-4 digits)
-    nums = set(re.findall(r"\b\d{1,4}\b", t))
-    # Number + unit context: "60 deaths", "500 soldiers", "3 percent"
-    # This lets the guard distinguish "60 deaths" vs "60 seats".
-    pairs = re.findall(r"\b(\d{1,4})\s+([a-z]{3,15})\b", t.lower())
+    # Bare numbers (1-4 digits) — exclude 4-digit calendar years (handled via dates)
+    nums = {n for n in re.findall(r"\b\d{1,4}\b", t)
+            if not (len(n) == 4 and 1900 <= int(n) <= 2100)}
+    # Number + unit context: "60 deaths", "10 gold", "22 percent"
+    # Use max 3 digits for pairs (years never pair meaningfully with a unit word)
+    pairs = re.findall(r"\b(\d{1,3})\s+([a-z]{3,15})\b", t.lower())
     for n, unit in pairs:
         nums.add(f"{n} {unit}")
     return nums
@@ -339,8 +340,23 @@ def key_facts_guard(claim_text: str, evidence_text: str, claim_facts: dict = Non
         if _check(g, hard_fail=True) is True:
             return False, debug
 
-    # Dates and numbers are soft (but enforced by HARD_GROUPS later)
-    _check("dates")
+    # Dates — only check specific month/day tokens; bare 4-digit years are too
+    # ambiguous (a 2017 claim matched against a 2023 article fails unfairly).
+    specific_dates = {d for d in (claim_f.get("dates") or set())
+                      if not re.match(r'^\d{4}$', str(d))}
+    if specific_dates:
+        groups_present.append("dates")
+        matched_d, ratio_d = _match_set_ratio(specific_dates, ev_lower)
+        debug["claim"]["dates"]   = sorted(specific_dates)
+        debug["matched"]["dates"] = sorted(matched_d)
+        debug["ratios"]["dates"]  = ratio_d
+        passes_d = len(matched_d) >= 1 and (ratio_d >= MIN_GROUP_RATIO or len(specific_dates) == 1)
+        if passes_d:
+            groups_matched.append("dates")
+        else:
+            debug["hard_mismatch"] = "dates"
+            return False, debug
+
     _check("numbers")
     _check("orgs")
 

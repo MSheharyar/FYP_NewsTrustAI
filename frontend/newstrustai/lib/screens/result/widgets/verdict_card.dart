@@ -41,6 +41,8 @@ class VerdictCard extends StatelessWidget {
   Color _toneColor() {
     final m = method.toLowerCase().trim();
     if (m == "edited_claim_suspected") return Colors.amber;
+    if (m == "soft_db_match") return const Color(0xFF00897B); // teal
+    if (m == "weak_similar_coverage") return Colors.blueGrey;
 
     if (_looksFake(title)) return Colors.red;
     if (_looksUnverified(title)) return Colors.amber;
@@ -52,6 +54,8 @@ class VerdictCard extends StatelessWidget {
   IconData _toneIcon() {
     final m = method.toLowerCase().trim();
     if (m == "edited_claim_suspected") return LucideIcons.alertTriangle;
+    if (m == "soft_db_match") return LucideIcons.checkCircle2;
+    if (m == "weak_similar_coverage") return LucideIcons.helpCircle;
 
     if (_looksFake(title)) return LucideIcons.shieldAlert;
     if (_looksUnverified(title)) return LucideIcons.badgeHelp;
@@ -63,6 +67,9 @@ class VerdictCard extends StatelessWidget {
   String _confidenceLine() {
     if (confidence == null) return "";
     final c = confidence!.clamp(0, 100).toDouble();
+    final m = method.toLowerCase().trim();
+    if (m == "soft_db_match") return "Fuzzy match — ${c.toStringAsFixed(0)}% similarity";
+    if (m == "weak_similar_coverage") return "Weak match — ${c.toStringAsFixed(0)}% similarity";
     if (c >= 95) return "Very high accuracy (95–100%)";
     if (c >= 85) return "High accuracy (85–95%)";
     if (c >= 70) return "Medium accuracy (70–84%)";

@@ -82,11 +82,19 @@ def build_search_queries(user_text: str) -> Tuple[List[str], str]:
 # ----------------------------
 # Unstructured input gate (prevents unreliable verdicts)
 # ----------------------------
+_EMOJI_RE = re.compile(
+    r'[\U0001F300-\U0001F9FF\U00002702-\U000027B0\U0001FA00-\U0001FA6F'
+    r'\U0001FA70-\U0001FAFF\U00002500-\U00002BEF]'
+)
+
 def looks_unstructured(text: str) -> bool:
     text = normalize_spaces(text)
     if len(text) < MIN_TEXT_LEN:
         return True
-    # too many emojis/symbols or mostly lower-case slang
+    # 2+ emoji characters → treat as spam/slang
+    if len(_EMOJI_RE.findall(text)) >= 2:
+        return True
+    # too many non-standard symbols
     non_alnum = sum(1 for c in text if not c.isalnum() and c not in " .,:;!?-'\"()")
     if non_alnum > 18:
         return True

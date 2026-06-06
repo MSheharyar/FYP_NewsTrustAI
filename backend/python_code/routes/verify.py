@@ -27,7 +27,7 @@ router = APIRouter()
 
 
 class VerifyTextRequest(BaseModel):
-    text: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1, max_length=10000)
     query: Optional[str] = None
 
 

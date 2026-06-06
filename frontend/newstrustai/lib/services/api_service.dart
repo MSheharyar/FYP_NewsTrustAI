@@ -7,35 +7,35 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // Backend Configuration
-  // Set useLocalBackend to true for development, false for production
-  static const bool useLocalBackend = true; // ✅ Set to true for local testing
+  // For local dev:   flutter run
+  // For production:  flutter run --dart-define=API_BASE_URL=https://your-server.com
+  static const bool useLocalBackend = true;
 
-  // Optional override:
-  // flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8000
+  // Runtime override — always takes priority.
+  // Pass --dart-define=API_BASE_URL=https://... for any non-local deployment.
   static final String _baseUrlOverride =
       const String.fromEnvironment('API_BASE_URL', defaultValue: '').trim();
-  
-  // Production Server (AWS EC2 or deployed backend)
-  static const String _productionUrl = "http://127.0.0.1:8000"; // FORCED TO LOCALHOST
-  
-  // Local Development
-  // Web/Desktop use localhost, Mobile uses device-specific URLs
+
+  // Local Development — platform-aware localhost address
+  // For physical Android device: replace 10.0.2.2 with your machine's LAN IP
+  // e.g. flutter run --dart-define=API_BASE_URL=http://172.16.4.13:8000
   static String get _localUrl {
-    // Keep original behavior: web builds use the deployed backend by default.
-    // Use --dart-define=API_BASE_URL=... to override when needed.
     if (kIsWeb) return "http://127.0.0.1:8000";
-
-    // Android emulator cannot reach host via localhost.
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return "http://10.0.2.2:8000";
+      // adb reverse tcp:8000 tcp:8000 tunnels this over USB to the laptop
+      return "http://127.0.0.1:8000";
     }
-
     return "http://localhost:8000";
   }
-  
+
   static String get _base {
     if (_baseUrlOverride.isNotEmpty) return _baseUrlOverride;
-    return useLocalBackend ? _localUrl : _productionUrl;
+    if (!useLocalBackend) {
+      assert(false,
+          'Set API_BASE_URL via --dart-define=API_BASE_URL=https://... for production builds');
+      return _localUrl;
+    }
+    return _localUrl;
   }
 
   static Future<Map<String, String>> _authHeaders() async {
@@ -76,8 +76,9 @@ class ApiService {
 
   static Future<Map<String, dynamic>> _postJson(
     String path,
-    Map<String, dynamic> payload,
-  ) async {
+    Map<String, dynamic> payload, {
+    Duration timeout = const Duration(seconds: 25),
+  }) async {
     try {
       final res = await http
           .post(
@@ -85,7 +86,7 @@ class ApiService {
             headers: await _authHeaders(),
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(seconds: 25));
+          .timeout(timeout);
 
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
@@ -135,11 +136,13 @@ class ApiService {
       "text": text,
       if (query != null && query.trim().isNotEmpty) "query": query.trim(),
     };
-    return _postJson("/verify-text", payload);
+    return _postJson("/verify-text", payload,
+        timeout: const Duration(seconds: 90));
   }
 
   static Future<Map<String, dynamic>> analyzeLink(String url) {
-    return _postJson("/analyze-link", {"url": url.trim()});
+    return _postJson("/analyze-link", {"url": url.trim()},
+        timeout: const Duration(seconds: 90));
   }
 
   static Future<List<dynamic>> fetchTrending({bool force = false}) async {
@@ -155,12 +158,33 @@ class ApiService {
     String message, {
     List<Map<String, dynamic>>? history,
     String? context,
-  }) {
-    return _postJson("/chat", {
+  }) async {
+    final payload = <String, dynamic>{
       "message": message,
       if (history != null && history.isNotEmpty) "history": history,
       if (context != null && context.isNotEmpty) "context": context,
-    });
+    };
+    try {
+      final res = await http
+          .post(
+            Uri.parse("$_base/chat"),
+            headers: await _authHeaders(),
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+        return {"error": true, "message": "Invalid server response format"};
+      }
+      return {"error": true, "message": _extractErrorMessage(res)};
+    } on TimeoutException {
+      return {"error": true, "message": "AI assistant timed out. Please try again."};
+    } catch (e) {
+      return {"error": true, "message": e.toString()};
+    }
   }
 
   // ✅ Robust: fixes www., //, relative paths, "null"/"none"

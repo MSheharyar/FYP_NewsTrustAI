@@ -17,6 +17,7 @@ Environment variables:
     GOOGLE_APPLICATION_CREDENTIALS — path to service account file (alternative)
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -66,7 +67,7 @@ async def require_firebase_auth(
 
     token = credentials.credentials
     try:
-        decoded = _fb_auth.verify_id_token(token)
+        decoded = await asyncio.to_thread(_fb_auth.verify_id_token, token)
         return decoded
     except _fb_auth.ExpiredIdTokenError:
         raise HTTPException(status_code=401, detail="Firebase token has expired. Please sign in again.")

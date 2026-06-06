@@ -1,7 +1,7 @@
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
@@ -9,6 +9,7 @@ from services.chat_service import chat_with_gemini
 from db.reader import get_candidate_articles
 from services.matching import score_match
 from middleware.auth import require_firebase_auth
+from routes.verify import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,13 +45,14 @@ class _HistoryTurn(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1)
-    context: Optional[str] = None          # verification result context string
+    message: str = Field(..., min_length=1, max_length=2000)
+    context: Optional[str] = None
     history: Optional[List[_HistoryTurn]] = []
 
 
 @router.post("/chat")
-def chat(payload: ChatRequest, user: dict = Depends(require_firebase_auth)):
+@limiter.limit("10/minute")
+def chat(request: Request, payload: ChatRequest, user: dict = Depends(require_firebase_auth)):
     message = (payload.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is empty.")

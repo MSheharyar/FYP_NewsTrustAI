@@ -99,6 +99,13 @@ def _fuse_bert_with_hybrid(hybrid: dict, bert_res: dict) -> dict:
     if bert_label not in {"fake", "real"} or bert_confidence <= 0.0:
         return hybrid
 
+    # Never override authoritative rejections with BERT
+    _skip_methods = {"input_too_vague", "no_text_evidence", "no_evidence",
+                     "edited_claim_suspected", "google_factcheck",
+                     "gdelt_main_sources", "gdelt_other_major_sources"}
+    if hybrid.get("verification_method", "") in _skip_methods:
+        return hybrid
+
     final_label = (hybrid.get("final_label") or "").lower()
 
     if final_label == "unverified":
@@ -117,11 +124,16 @@ def _fuse_bert_with_hybrid(hybrid: dict, bert_res: dict) -> dict:
             })
         elif bert_label == "real" and bert_confidence >= BERT_SUGGEST_REAL_THRESHOLD:
             hybrid.update({
+                "final_label": "real",
+                "final_confidence": float(CONF_VERY_LOW),
+                "authenticity": "real",
+                "confidence": float(CONF_VERY_LOW),
+                "verdict_state": "bert_suggested_real",
+                "verification_method": "bert_suggested_real",
                 "final_reason": _append_reason(
                     hybrid.get("final_reason", ""),
-                    f"No strong external evidence was found. The model suggests this claim is real with {bert_confidence:.0%} confidence."
+                    f"No strong external evidence was found, but the AI model suggests this claim is real with {bert_confidence:.0%} confidence. Treat with caution."
                 ),
-                "verification_method": "bert_suggested_real",
             })
         return hybrid
 
@@ -288,18 +300,27 @@ def hybrid_decision(text: str, source_domain: str = ""):
             "main_support_domains": [],
         }
 
-    # Use the keyword index to pre-filter candidates instead of scanning the full DB
-    claim_keywords = re.findall(r'\b[a-z]{4,}\b', claim.lower())
-    candidates = get_candidate_articles(claim_keywords) if claim_keywords else safe_read_db()
-
-    # Lazy fact extraction — spaCy NER is expensive; compute once and reuse
-    # for both key_facts_guard calls and the GDELT entity guard.
+    # Lazy fact extraction — spaCy NER is expensive; compute once and reuse.
     _claim_facts_cache: list = [None]
 
     def _get_claim_facts():
         if _claim_facts_cache[0] is None:
             _claim_facts_cache[0] = facts_from_text(text)
         return _claim_facts_cache[0]
+
+    # Claims with fewer than 2 distinct named entities (person/location/org) are too
+    # vague to trust database matching — skip BM25 and fall through to fact-check/GDELT.
+    _cf_early = _get_claim_facts()
+    _named_ent_count = (len(_cf_early["persons"])
+                        + len(_cf_early["locations"])
+                        + len(_cf_early["orgs"]))
+
+    # Use the keyword index to pre-filter candidates instead of scanning the full DB
+    claim_keywords = re.findall(r'\b[a-z]{4,}\b', claim.lower())
+    if _named_ent_count >= 2:
+        candidates = get_candidate_articles(claim_keywords) if claim_keywords else safe_read_db()
+    else:
+        candidates = []  # skip BM25 for low-entity claims; use fact-check fallback
 
     matches = []
     soft_candidates = []

@@ -1,5 +1,8 @@
+import ipaddress
 import logging
+import socket
 from typing import Tuple
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,6 +20,21 @@ router = APIRouter()
 
 class AnalyzeLinkRequest(BaseModel):
     url: HttpUrl
+
+
+def _is_safe_url(url: str) -> bool:
+    """Reject URLs that resolve to private/loopback/internal IPs (SSRF prevention)."""
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return False
+        ip = socket.gethostbyname(hostname)
+        addr = ipaddress.ip_address(ip)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved:
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def fetch_article_text(url: str) -> Tuple[str, str]:
@@ -120,6 +138,10 @@ def _attach_link_meta(
 
 def _core(payload: AnalyzeLinkRequest) -> dict:
     url    = str(payload.url).strip()
+
+    if not _is_safe_url(url):
+        raise HTTPException(status_code=400, detail="URL is not allowed.")
+
     domain = get_domain(url)
     is_main_source = domain_in_set(domain, MAIN_SOURCE_DOMAINS)
 
@@ -137,9 +159,12 @@ def _core(payload: AnalyzeLinkRequest) -> dict:
     except requests.exceptions.ConnectionError:
         extraction_error = "Failed to connect to the article host."
     except requests.exceptions.HTTPError as e:
-        extraction_error = str(e)
+        status_code = e.response.status_code if e.response is not None else "unknown"
+        extraction_error = f"HTTP {status_code} from article host."
+        logger.debug("HTTP error fetching %s: %s", url, e)
     except Exception as e:
-        extraction_error = str(e)
+        extraction_error = "Failed to process the article."
+        logger.debug("Unexpected error fetching %s: %s", url, e)
 
     # 404 — invalid link, skip verification entirely
     if extraction_error and ("404" in extraction_error or "Not Found" in extraction_error):
