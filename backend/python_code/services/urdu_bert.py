@@ -13,13 +13,10 @@ Setup:
 """
 
 import re
-import requests
 from typing import Dict, Any
 
-# ─────────────────────────────────────────────────────────────
-# Configuration (reads from environment / settings)
-# ─────────────────────────────────────────────────────────────
 from config.settings import HF_API_TOKEN, URDU_MODEL_ID, HF_REQUEST_TIMEOUT, ROMAN_URDU_THRESHOLD
+from services.http_client import safe_post_json
 
 HF_API_URL = f"https://api-inference.huggingface.co/models/{URDU_MODEL_ID}"
 
@@ -78,23 +75,17 @@ def urdu_bert_predict(text: str) -> Dict[str, Any]:
         return _fallback("Empty text.")
 
     if not HF_API_TOKEN:
-        return _fallback(
-            "HF_API_TOKEN not set. Add it as an environment variable on your server. "
-            "Get a free token at https://huggingface.co/settings/tokens"
-        )
+        return _model_unavailable()
+
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    payload = {"inputs": text, "options": {"wait_for_model": True}}
+
+    data = safe_post_json(HF_API_URL, json_body=payload, headers=headers,
+                          timeout=HF_REQUEST_TIMEOUT)
+    if data is None:
+        return _model_unavailable()
 
     try:
-        headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-        payload = {
-            "inputs": text,
-            "options": {"wait_for_model": True}  # waits if model is cold-starting
-        }
-
-        resp = requests.post(HF_API_URL, headers=headers, json=payload,
-                             timeout=HF_REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
-
         # HuggingFace returns one of two shapes:
         #   [[{"label": "LABEL_0", "score": 0.92}, ...]]   ← text-classification
         #   [{"label": "LABEL_0", "score": 0.92}, ...]     ← some models
@@ -135,14 +126,18 @@ def urdu_bert_predict(text: str) -> Dict[str, Any]:
             "note": "urdu_hf_api",
         }
 
-    except requests.exceptions.Timeout:
-        return _fallback("Urdu API request timed out. Result left as unverified.")
-    except requests.exceptions.ConnectionError:
-        return _fallback("Cannot reach HuggingFace API. Check server internet access.")
-    except requests.exceptions.HTTPError as e:
-        return _fallback(f"HuggingFace API HTTP error: {e}")
     except Exception as e:
         return _fallback(f"Urdu model error: {e}")
+
+
+def _model_unavailable() -> Dict[str, Any]:
+    """Returned when the HF token is missing or the API call failed."""
+    return {
+        "label": "unverified",
+        "confidence": 0.0,
+        "probabilities": {"fake": 0.0, "real": 0.0},
+        "note": "urdu_model_unavailable",
+    }
 
 
 def _fallback(note: str) -> Dict[str, Any]:

@@ -274,7 +274,11 @@ def run_full_pipeline(text: str) -> dict:
     result["bert_label"]      = bert_res.get("label")
     result["bert_confidence"] = float(bert_res.get("confidence") or 0.0)
     result["probabilities"]   = bert_res.get("probabilities")
-    result["bert_note"]       = bert_res.get("note")
+    bert_note = bert_res.get("note")
+    if bert_note == "urdu_model_unavailable":
+        result["bert_note"] = "Urdu model temporarily unavailable"
+    else:
+        result["bert_note"] = bert_note
 
     if bert_res.get("label"):
         result = _fuse_bert_with_hybrid(result, bert_res)
