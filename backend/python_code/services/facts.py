@@ -340,6 +340,26 @@ def key_facts_guard(claim_text: str, evidence_text: str, claim_facts: dict = Non
         if _check(g, hard_fail=True) is True:
             return False, debug
 
+    # Location ORDER check: if exactly 2 locations appear in reversed order
+    # (e.g., claim says "India beat Pakistan" but evidence says "Pakistan beat India"),
+    # flag as an entity-swapped claim — the inversion guard in score_match lowers
+    # the fuzzy score but may not drop it below the verification threshold.
+    _locations = claim_f.get("locations") or set()
+    if len(_locations) == 2:
+        _l1, _l2 = sorted(_locations)  # deterministic regardless of set hash order
+        if _l1 in ev_lower and _l2 in ev_lower:
+            _claim_lower = normalize_text(claim_text).lower()
+            _p1c = _claim_lower.find(_l1)
+            _p2c = _claim_lower.find(_l2)
+            _p1e = ev_lower.find(_l1)
+            _p2e = ev_lower.find(_l2)
+            if all(p >= 0 for p in (_p1c, _p2c, _p1e, _p2e)):
+                _claim_order = _p1c < _p2c
+                _ev_order = _p1e < _p2e
+                if _claim_order != _ev_order:
+                    debug["hard_mismatch"] = "location_order_swapped"
+                    return False, debug
+
     # Dates — only check specific month/day tokens; bare 4-digit years are too
     # ambiguous (a 2017 claim matched against a 2023 article fails unfairly).
     specific_dates = {d for d in (claim_f.get("dates") or set())
