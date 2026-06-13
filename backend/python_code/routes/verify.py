@@ -26,6 +26,32 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def run_parallel_verification(text, hybrid_fn, nli_fn, db_search_fn=None):
+    """Run hybrid + NLI in parallel. If either raises, capture None for that
+    side and flag the result as degraded so the request still returns a verdict."""
+    def _safe(fn, *args):
+        try:
+            return fn(*args), None
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("verification thread failed: %s", fn)
+            return None, exc
+
+    fut_hybrid = _executor.submit(_safe, hybrid_fn, text)
+    if db_search_fn is not None:
+        fut_nli = _executor.submit(_safe, nli_fn, text, db_search_fn)
+    else:
+        fut_nli = _executor.submit(_safe, nli_fn, text)
+
+    hybrid_res, hybrid_err = fut_hybrid.result()
+    nli_res, nli_err = fut_nli.result()
+
+    return {
+        "hybrid": hybrid_res,
+        "nli": nli_res,
+        "degraded": bool(hybrid_err) or bool(nli_err),
+    }
+
+
 class VerifyTextRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=10000)
     query: Optional[str] = None
@@ -215,25 +241,32 @@ def run_full_pipeline(text: str) -> dict:
 
     nli_res    = {"verified": False, "final_label": "UNVERIFIED", "nli": {}}
     hybrid_res = {}
+    degraded   = False
 
-    try:
-        if text_is_urdu:
-            hybrid_res = _executor.submit(hybrid_decision, text).result(timeout=45)
-        elif _is_question(text):
-            future_hybrid = _executor.submit(hybrid_decision, text)
-            hybrid_res = future_hybrid.result(timeout=45)
-        else:
-            verifier      = get_text_verifier()
-            future_nli    = _executor.submit(verifier.verify, text, db_search_fn)
-            future_hybrid = _executor.submit(hybrid_decision, text)
-            nli_res    = future_nli.result(timeout=45)
-            hybrid_res = future_hybrid.result(timeout=45)
-    except Exception as exc:
-        logger.warning("Parallel verification error (%s) — falling back to hybrid only.", exc)
-        if not hybrid_res:
-            hybrid_res = hybrid_decision(text)
+    if text_is_urdu or _is_question(text):
+        # Single-branch: only hybrid runs for Urdu / question inputs.
+        par = run_parallel_verification(
+            text,
+            hybrid_fn=hybrid_decision,
+            nli_fn=lambda t: {"verified": False, "final_label": "UNVERIFIED", "nli": {}},
+        )
+        hybrid_res = par["hybrid"] or hybrid_decision(text)
+        degraded   = par["degraded"]
+    else:
+        verifier = get_text_verifier()
+        par = run_parallel_verification(
+            text,
+            hybrid_fn=hybrid_decision,
+            nli_fn=verifier.verify,
+            db_search_fn=db_search_fn,
+        )
+        hybrid_res = par["hybrid"] or hybrid_decision(text)
+        nli_res    = par["nli"]    or {"verified": False, "final_label": "UNVERIFIED", "nli": {}}
+        degraded   = par["degraded"]
 
     result = _fuse_nli_with_hybrid(nli_res, hybrid_res)
+    if degraded:
+        result["degraded"] = True
 
     result["detected_language"] = "urdu" if text_is_urdu else "english"
     bert_res = urdu_bert_predict(text) if text_is_urdu else bert_predict(text)
