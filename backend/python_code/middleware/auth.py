@@ -19,6 +19,7 @@ Environment variables:
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException
@@ -27,6 +28,19 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from config.settings import REQUIRE_AUTH
 
 logger = logging.getLogger(__name__)
+
+
+def assert_auth_config_is_safe() -> None:
+    """Raise RuntimeError if auth is disabled outside a local/dev environment.
+    Call once at startup to prevent accidental production deployments with auth off."""
+    require_auth = os.getenv("REQUIRE_AUTH", "true").lower() == "true"
+    app_env = os.getenv("APP_ENV", "production").lower()
+    if not require_auth and app_env not in ("local", "dev", "development"):
+        raise RuntimeError(
+            "REQUIRE_AUTH=false is only allowed when APP_ENV is local/dev. "
+            "Set APP_ENV=local for local development, or REQUIRE_AUTH=true."
+        )
+
 
 # Reuse FastAPI's built-in Bearer extractor (returns 403 if header absent)
 _bearer_scheme = HTTPBearer(auto_error=False)

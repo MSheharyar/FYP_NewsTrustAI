@@ -55,6 +55,9 @@ async def lifespan(_app: FastAPI):
     Load heavy ML resources once (if available) so requests don't pay the cost.
     Falls back gracefully when torch/transformers or model files aren't present.
     """
+    from middleware.auth import assert_auth_config_is_safe
+    assert_auth_config_is_safe()
+
     # Firebase must be ready before the first request
     if REQUIRE_AUTH:
         _init_firebase()
