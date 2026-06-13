@@ -14,6 +14,7 @@ from services.bert import bert_predict
 from services.urdu_bert import urdu_bert_predict, is_urdu
 from services.lime_explainer import get_fake_highlights
 from services.matching import score_match
+from services.result_cache import ResultCache
 from db.reader import get_candidate_articles
 from text_verifier import get_text_verifier
 from middleware.auth import require_firebase_auth
@@ -24,6 +25,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_result_cache = ResultCache()
 
 
 def run_parallel_verification(text, hybrid_fn, nli_fn, db_search_fn=None):
@@ -236,6 +238,11 @@ def run_full_pipeline(text: str) -> dict:
     language detection → NLI + Hybrid (parallel) → fuse → BERT → LIME.
     Returns a plain dict — HTTP exception handling is the caller's responsibility.
     """
+    cached = _result_cache.get(text)
+    if cached is not None:
+        cached["cached"] = True
+        return cached
+
     text_is_urdu = is_urdu(text)
     db_search_fn = _make_db_search_fn()
 
@@ -300,6 +307,11 @@ def run_full_pipeline(text: str) -> dict:
             result["explanation_text"] = ""
 
     result.setdefault("error", False)
+
+    # Cache successful, non-degraded results for repeat/viral claims.
+    if not result.get("degraded") and not result.get("error"):
+        _result_cache.set(text, result)
+
     return result
 
 
