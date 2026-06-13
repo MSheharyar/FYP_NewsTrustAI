@@ -150,8 +150,19 @@ class _UploadImageScreenState extends State<UploadImageScreen> {
   Future<void> _verifyExtractedText() async {
     final text = _extractedTextController.text.trim();
     if (text.length < 20 || text == 'No readable text found.') {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Text too short to verify')),
+        SnackBar(
+          content: const Text(
+            "We couldn't read enough text from that image. "
+            "Try a clearer screenshot, better lighting, or crop to just the news text.",
+          ),
+          action: SnackBarAction(
+            label: "Choose another",
+            onPressed: _showImageSourceSheet,
+          ),
+          duration: const Duration(seconds: 6),
+        ),
       );
       return;
     }

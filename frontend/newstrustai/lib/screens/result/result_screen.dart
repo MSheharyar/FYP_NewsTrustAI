@@ -777,6 +777,35 @@ class _ResultScreenState extends State<ResultScreen> {
               padding: const EdgeInsets.all(16),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
+                  // Degraded result banner — shown when one verification thread failed.
+                  if (widget.data["degraded"] == true) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.amber[50],
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.amber.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.alertTriangle, size: 16, color: Colors.amber[800]),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              "Some checks didn't finish, so this result may be incomplete.",
+                              style: TextStyle(color: Colors.amber[900], fontSize: 13, height: 1.4, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text("Try again"),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   VerdictCard(
                     title: vm.verdictTitle,
                     subtitle: vm.verdictSubtitle,

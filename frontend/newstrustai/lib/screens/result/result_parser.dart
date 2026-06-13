@@ -1,5 +1,32 @@
 import 'result_view_model.dart';
 
+// Single source of truth for converting internal verification_method values
+// into plain-language strings shown to the user. No pipeline jargon reaches the UI.
+const Map<String, String> kMethodFriendlyText = {
+  'db_match': 'We found this story in trusted news sources.',
+  'soft_db_match': 'We found a closely matching story in trusted sources.',
+  'weak_similar_coverage': 'We found loosely related coverage, but not a strong match.',
+  'edited_claim_suspected':
+      'This looks like an altered version of a real story — key details (names, places, or numbers) don\'t match.',
+  'input_too_vague':
+      'There wasn\'t enough detail to check this. Try pasting the full claim.',
+  'google_factcheck': 'A professional fact-checking organization has reviewed this.',
+  'newsapi_cross_verified': 'Recent reporting from trusted publishers supports this.',
+  'gdelt_main_sources': 'Major news outlets are reporting this.',
+  'gdelt_other_major_sources': 'Some established outlets are reporting this.',
+  'nli_semantic': 'The evidence we found supports this claim.',
+  'nli_contradiction': 'The evidence we found contradicts this claim.',
+  'bert_only':
+      'Our AI model flagged the wording as likely fake; we couldn\'t find supporting sources.',
+  'bert_suggested_real':
+      'Our AI model thinks this is likely genuine, but we couldn\'t confirm it with sources.',
+  'no_evidence': 'We couldn\'t find any evidence about this claim.',
+  'error_degraded': 'Part of our check didn\'t complete. Please try again in a moment.',
+};
+
+String friendlyMethod(String? method) =>
+    kMethodFriendlyText[method] ?? 'We analyzed this claim against our sources.';
+
 double? _toDouble(dynamic v) {
   if (v == null) return null;
   if (v is num) return v.toDouble();
@@ -170,38 +197,20 @@ ResultViewModel parseResultData(
                       ? "We found signals that contradict or discredit the claim."
                       : "We found similar coverage, but not enough strong evidence to verify."));
 
-  String whatCheckedText = "Verification process:\n\n";
-
-  if (method == "input_too_vague") {
-    whatCheckedText = "Input validation: The text was too incomplete or unclear to verify reliably.";
-  } else if (method == "db_match" || method == "soft_db_match" || method == "weak_similar_coverage") {
-    whatCheckedText += "• Database search: Compared claim against stored news articles for matching coverage.\n";
-    whatCheckedText += "• Fact extraction: Analyzed key facts (persons, places, dates) for consistency.\n";
-  } else if (method.startsWith("gdelt")) {
-    whatCheckedText += "• Live lookup: Searched major news domains in real-time for similar coverage.\n";
-    whatCheckedText += "• Domain reputation: Prioritized results from trusted news sources.\n";
-  } else if (method == "google_factcheck") {
-    whatCheckedText += "• Fact-check API: Queried published fact-check databases for the claim.\n";
-    whatCheckedText += "• Rating analysis: Reviewed fact-checker ratings and evidence.\n";
-  } else if (method == "edited_claim_suspected") {
-    whatCheckedText += "• Database search: Found related coverage but detected key fact mismatches.\n";
-    whatCheckedText += "• Fact validation: Rejected verification due to potential claim alteration.\n";
-  } else if (method == "bert_only") {
-    whatCheckedText += "• Model prediction: No strong external evidence found, used AI model analysis.\n";
-  } else {
-    whatCheckedText += "• Multi-source check: Combined database, live lookup, and fact-check evidence.\n";
-  }
+  // Build the "how we checked" text from the plain-language map.
+  String whatCheckedText = friendlyMethod(method.isNotEmpty ? method : null);
 
   if (bertLabel.isNotEmpty && method != "bert_only") {
     final String modelLabelText = bertLabel == "fake" ? "Fake/Misleading" : "Real";
     final String modelText = bertConfidence != null
-        ? "• Model analysis: Predicted '$modelLabelText' with ${bertConfidence.toStringAsFixed(0)}% confidence."
-        : "• Model analysis: Provided additional prediction '$modelLabelText'.";
-    whatCheckedText += "\n$modelText";
+        ? "\n\nAI model also predicted '$modelLabelText' with ${bertConfidence.toStringAsFixed(0)}% confidence."
+        : "\n\nAI model also predicted '$modelLabelText'.";
+    whatCheckedText += modelText;
   }
 
   if (modelDisagreement) {
-    whatCheckedText += "\n\n⚠️ Model disagreement: The AI model result differs from evidence-based verdict - requires careful review.";
+    whatCheckedText +=
+        "\n\nNote: Our AI model and evidence sources reached different conclusions — review the matched sources carefully.";
   }
 
   final tips = <String>[
