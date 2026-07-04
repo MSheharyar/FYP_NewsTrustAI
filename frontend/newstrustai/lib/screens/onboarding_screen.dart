@@ -20,7 +20,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       color: Color(0xFF3B82F6),
       title: "Verify News Instantly",
       subtitle:
-          "Paste any headline, link, or screenshot. We cross-check it against 36,000+ trusted news articles in seconds.",
+          "Paste any headline, link, or screenshot. We cross-check it against 55,000+ trusted news articles in seconds.",
     ),
     _PageData(
       icon: LucideIcons.brain,

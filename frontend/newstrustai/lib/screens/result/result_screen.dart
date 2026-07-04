@@ -161,6 +161,15 @@ class ResultScreen extends StatefulWidget {
 class _ResultScreenState extends State<ResultScreen> {
   final _history = FirestoreHistoryService();
   bool _saved = false;
+  bool? _feedbackGiven; // null = not yet given, true = helpful, false = not helpful
+
+  Future<void> _submitFeedback(bool helpful, String verdict) async {
+    if (_feedbackGiven != null) return;
+    setState(() => _feedbackGiven = helpful);
+    try {
+      await _history.saveFeedback(verdict: verdict, helpful: helpful);
+    } catch (_) {}
+  }
 
   String _safeStr(dynamic v, [String fallback = ""]) {
     if (v == null) return fallback;
@@ -1010,6 +1019,72 @@ class _ResultScreenState extends State<ResultScreen> {
                   ),
                 ),
               ),
+
+            // Feedback widget
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
+                  ),
+                  child: _feedbackGiven == null
+                      ? Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              "Was this result helpful?",
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.black87),
+                            ),
+                            Row(
+                              children: [
+                                IconButton(
+                                  tooltip: "Yes, helpful",
+                                  icon: const Icon(LucideIcons.thumbsUp, size: 20),
+                                  color: Colors.green[600],
+                                  onPressed: () {
+                                    final verdict = vm.isReal ? "verified" : (vm.isFake ? "fake" : (vm.isMixed ? "mixed" : "unverified"));
+                                    _submitFeedback(true, verdict);
+                                  },
+                                ),
+                                IconButton(
+                                  tooltip: "Not helpful",
+                                  icon: const Icon(LucideIcons.thumbsDown, size: 20),
+                                  color: Colors.red[400],
+                                  onPressed: () {
+                                    final verdict = vm.isReal ? "verified" : (vm.isFake ? "fake" : (vm.isMixed ? "mixed" : "unverified"));
+                                    _submitFeedback(false, verdict);
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _feedbackGiven! ? LucideIcons.thumbsUp : LucideIcons.thumbsDown,
+                              size: 18,
+                              color: _feedbackGiven! ? Colors.green[600] : Colors.red[400],
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Thank you for your feedback!",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                                color: _feedbackGiven! ? Colors.green[700] : Colors.red[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+            ),
 
             // Ask AI Button
             SliverToBoxAdapter(

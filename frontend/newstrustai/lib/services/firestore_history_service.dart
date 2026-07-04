@@ -62,6 +62,25 @@ class FirestoreHistoryService {
     });
   }
 
+  /// Save a thumbs-up/down feedback on a verification result
+  Future<void> saveFeedback({
+    required String verdict,
+    required bool helpful,
+  }) async {
+    final u = _user;
+    if (u == null) return;
+
+    await _db
+        .collection("users")
+        .doc(u.uid)
+        .collection("feedback")
+        .add({
+          "verdict": verdict,
+          "helpful": helpful,
+          "createdAt": FieldValue.serverTimestamp(),
+        });
+  }
+
   /// Clear all history for current user
   Future<void> clearHistory() async {
     final u = _user;
