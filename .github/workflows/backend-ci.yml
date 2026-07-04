@@ -26,4 +26,4 @@ jobs:
           pip install -r requirements-dev.txt
           python -m spacy download en_core_web_sm
       - name: Run tests
-        run: python -m pytest -v --cov=. --cov-report=term-missing --cov-omit="tests/*,*/__pycache__/*"
+        run: python -m pytest -v --cov=. --cov-report=term-missing
