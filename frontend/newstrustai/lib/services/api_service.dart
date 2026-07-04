@@ -9,12 +9,14 @@ class ApiService {
   // Backend Configuration
   // For local dev:   flutter run
   // For production:  flutter run --dart-define=API_BASE_URL=https://your-server.com
-  static const bool useLocalBackend = true;
+  static const bool useLocalBackend = false;
 
   // Runtime override — always takes priority.
-  // Pass --dart-define=API_BASE_URL=https://... for any non-local deployment.
+  // Pass --dart-define=API_BASE_URL=http://... to override at build time.
+  // Defaults to the VPS backend; override for local dev:
+  //   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000
   static final String _baseUrlOverride =
-      const String.fromEnvironment('API_BASE_URL', defaultValue: '').trim();
+      const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://187.127.124.132:8000').trim();
 
   // Local Development — platform-aware localhost address
   // For physical Android device: replace 10.0.2.2 with your machine's LAN IP
