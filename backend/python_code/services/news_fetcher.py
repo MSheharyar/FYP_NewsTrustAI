@@ -15,22 +15,39 @@ logger = logging.getLogger(__name__)
 # Trusted Pakistani + international news sources
 # lang: "en" = English, "ur" = Urdu
 RSS_FEEDS = [
-    # ── English ──────────────────────────────────────────────────────────────
-    {"url": "https://www.dawn.com/feeds/home",             "source": "Dawn",        "domain": "dawn.com",              "lang": "en"},
-    {"url": "https://arynews.tv/feed/",                    "source": "ARY News",    "domain": "arynews.tv",            "lang": "en"},
-    {"url": "https://www.geo.tv/rss/",                     "source": "Geo News",    "domain": "geo.tv",                "lang": "en"},
-    {"url": "https://www.thenews.com.pk/rss/1/8",          "source": "The News",    "domain": "thenews.com.pk",        "lang": "en"},
-    {"url": "https://feeds.bbci.co.uk/news/world/rss.xml", "source": "BBC News",    "domain": "bbc.com",               "lang": "en"},
-    {"url": "https://feeds.reuters.com/reuters/topNews",   "source": "Reuters",     "domain": "reuters.com",           "lang": "en"},
+    # ── English — Pakistani ───────────────────────────────────────────────────
+    {"url": "https://www.dawn.com/feeds/home",                   "source": "Dawn",              "domain": "dawn.com",              "lang": "en"},
+    {"url": "https://arynews.tv/feed/",                          "source": "ARY News",          "domain": "arynews.tv",            "lang": "en"},
+    {"url": "https://www.geo.tv/rss/",                           "source": "Geo News",          "domain": "geo.tv",                "lang": "en"},
+    {"url": "https://www.thenews.com.pk/rss/1/8",                "source": "The News",          "domain": "thenews.com.pk",        "lang": "en"},
+    {"url": "https://tribune.com.pk/feed",                       "source": "Express Tribune",   "domain": "tribune.com.pk",        "lang": "en"},
+    {"url": "https://www.pakistantoday.com.pk/feed/",            "source": "Pakistan Today",    "domain": "pakistantoday.com.pk",  "lang": "en"},
+    {"url": "https://dailytimes.com.pk/feed/",                   "source": "Daily Times",       "domain": "dailytimes.com.pk",     "lang": "en"},
+    {"url": "https://nation.com.pk/feed/",                       "source": "The Nation",        "domain": "nation.com.pk",         "lang": "en"},
+    {"url": "https://www.brecorder.com/feed",                    "source": "Business Recorder", "domain": "brecorder.com",         "lang": "en"},
+    {"url": "https://dunyanews.tv/index.php/en?format=feed",     "source": "Dunya News",        "domain": "dunyanews.tv",          "lang": "en"},
+    {"url": "https://www.samaa.tv/feed/",                        "source": "Samaa TV",          "domain": "samaa.tv",              "lang": "en"},
+    # ── English — International ───────────────────────────────────────────────
+    {"url": "https://feeds.bbci.co.uk/news/world/rss.xml",       "source": "BBC News",          "domain": "bbc.com",               "lang": "en"},
+    {"url": "https://feeds.bbci.co.uk/news/south_asia/rss.xml",  "source": "BBC South Asia",    "domain": "bbc.com",               "lang": "en"},
+    {"url": "https://feeds.reuters.com/reuters/topNews",         "source": "Reuters",           "domain": "reuters.com",           "lang": "en"},
+    {"url": "https://www.aljazeera.com/xml/rss/all.xml",         "source": "Al Jazeera",        "domain": "aljazeera.com",         "lang": "en"},
+    {"url": "https://feeds.apnews.com/apnews/topnews",           "source": "AP News",           "domain": "apnews.com",            "lang": "en"},
+    {"url": "https://rss.cnn.com/rss/edition.rss",               "source": "CNN",               "domain": "cnn.com",               "lang": "en"},
+    {"url": "https://feeds.skynews.com/feeds/rss/world.xml",     "source": "Sky News",          "domain": "skynews.com",           "lang": "en"},
     # ── Urdu ─────────────────────────────────────────────────────────────────
-    {"url": "https://feeds.bbci.co.uk/urdu/rss.xml",       "source": "BBC Urdu",    "domain": "bbc.com/urdu",          "lang": "ur"},
-    {"url": "https://www.express.pk/feed/",                "source": "Express News","domain": "express.pk",            "lang": "ur"},
-    {"url": "https://jang.com.pk/rss/",                    "source": "Jang",        "domain": "jang.com.pk",           "lang": "ur"},
-    {"url": "https://urdu.geo.tv/rss/",                    "source": "Geo Urdu",    "domain": "urdu.geo.tv",           "lang": "ur"},
-    {"url": "https://www.samaa.tv/feed/",                  "source": "Samaa News",  "domain": "samaa.tv",              "lang": "ur"},
+    {"url": "https://feeds.bbci.co.uk/urdu/rss.xml",             "source": "BBC Urdu",          "domain": "bbc.com/urdu",          "lang": "ur"},
+    {"url": "https://www.express.pk/feed/",                      "source": "Express News",      "domain": "express.pk",            "lang": "ur"},
+    {"url": "https://jang.com.pk/rss/",                          "source": "Jang",              "domain": "jang.com.pk",           "lang": "ur"},
+    {"url": "https://urdu.geo.tv/rss/",                          "source": "Geo Urdu",          "domain": "urdu.geo.tv",           "lang": "ur"},
+    {"url": "https://urdu.arynews.tv/feed/",                     "source": "ARY Urdu",          "domain": "urdu.arynews.tv",       "lang": "ur"},
+    {"url": "https://www.nawaiwaqt.com.pk/feed/",                "source": "Nawaiwaqt",         "domain": "nawaiwaqt.com.pk",      "lang": "ur"},
+    {"url": "https://www.urdupoint.com/news/feed/",              "source": "Urdupoint",         "domain": "urdupoint.com",         "lang": "ur"},
+    {"url": "https://www.independenturdu.com/feed",              "source": "Independent Urdu",  "domain": "independenturdu.com",   "lang": "ur"},
 ]
 
-MAX_DB_SIZE = 60_000  # cap total articles to avoid unbounded growth
+MAX_DB_SIZE = 120_000  # cap total articles to avoid unbounded growth
+_PER_FEED_LIMIT = 50   # articles to take from each feed per refresh
 
 
 def _parse_date(entry) -> str:
@@ -49,7 +66,7 @@ def _fetch_one_feed(feed_meta: dict) -> list[dict]:
     try:
         parsed = feedparser.parse(feed_meta["url"])
         articles = []
-        for entry in parsed.entries[:30]:
+        for entry in parsed.entries[:_PER_FEED_LIMIT]:
             title   = (entry.get("title")   or "").strip()
             summary = (entry.get("summary") or entry.get("description") or "").strip()
             url     = (entry.get("link")    or "").strip()
