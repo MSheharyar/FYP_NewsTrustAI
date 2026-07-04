@@ -140,3 +140,8 @@ app.include_router(links_router)
 app.include_router(trending_router)
 app.include_router(debug_router)
 app.include_router(chat_router)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": app.version}
