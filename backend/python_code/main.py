@@ -55,6 +55,7 @@ async def lifespan(_app: FastAPI):
     Load heavy ML resources once (if available) so requests don't pay the cost.
     Falls back gracefully when torch/transformers or model files aren't present.
     """
+    import asyncio
     from middleware.auth import assert_auth_config_is_safe
     assert_auth_config_is_safe()
 
@@ -87,6 +88,15 @@ async def lifespan(_app: FastAPI):
         logger.info("spaCy NER warmed up.")
     except Exception as e:
         logger.warning("Startup warmup failed (non-fatal): %s", e)
+
+    # Start background news refresh loop (every 30 minutes)
+    try:
+        from services.news_fetcher import news_refresh_loop
+        asyncio.create_task(news_refresh_loop())
+        logger.info("News refresh background task started.")
+    except Exception as e:
+        logger.warning("News refresh task failed to start (non-fatal): %s", e)
+
     yield
 
 

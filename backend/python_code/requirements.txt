@@ -43,5 +43,8 @@ firebase-admin~=6.0
 # Rate limiting (per-IP request throttle on /verify-text)
 slowapi~=0.1.9
 
+# RSS feed parsing (background news fetcher)
+feedparser~=6.0
+
 # Gemini API (AI chatbot) — uses the new google-genai SDK
 google-genai~=1.0

@@ -50,6 +50,9 @@ def trending(request: Request):
 
     items = [normalize_item(it) for it in items if isinstance(it, dict)]
 
+    # Freshest articles first
+    items.sort(key=lambda x: x.get("publishedAt") or "", reverse=True)
+
     buckets = {}
     for it in items:
         src = (it.get("source") or it.get("sourceName") or "Unknown").strip()

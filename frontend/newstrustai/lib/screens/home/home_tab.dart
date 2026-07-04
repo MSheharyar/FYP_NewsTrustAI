@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../services/api_service.dart';
@@ -22,11 +23,22 @@ class _HomeTabState extends State<HomeTab> {
   List<dynamic> _newsArticles = [];
   bool _isLoading = true;
   String? _error;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadTrendingNews();
+    // Auto-refresh every 30 minutes so trending news stays current
+    _refreshTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+      _loadTrendingNews();
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadTrendingNews() async {
