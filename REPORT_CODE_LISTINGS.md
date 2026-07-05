@@ -18,11 +18,23 @@ Curated, report-ready code excerpts. Each listing is trimmed of boilerplate
 1. [The verification pipeline orchestrator](#listing-1--the-verification-pipeline-orchestrator)
 2. [Fusing evidence search with the NLI model](#listing-2--fusing-evidence-search-with-the-nli-model)
 3. [The semantic-inversion guard in fuzzy matching](#listing-3--the-semantic-inversion-guard-in-fuzzy-matching)
+9. [Bilingual language detection (Urdu script + Romanised)](#listing-9--bilingual-language-detection-urdu-script--romanised)
 
 **Tier 2 — Supporting depth (appendix)**
 4. [Key-facts guard — edited-claim detection](#listing-4--key-facts-guard--edited-claim-detection)
 5. [NLI semantic verification — weighted vote & consensus](#listing-5--nli-semantic-verification--weighted-vote--consensus)
 6. [Hybrid decision — vagueness gate & candidate retrieval](#listing-6--hybrid-decision--vagueness-gate--candidate-retrieval)
+10. [Parallel verification with graceful degradation](#listing-10--parallel-verification-with-graceful-degradation)
+11. [Fusing the BERT classifier](#listing-11--fusing-the-bert-classifier)
+
+**Explainability (XAI section)**
+12. [LIME word-importance highlights](#listing-12--lime-word-importance-highlights)
+
+**Frontend (if you have a frontend chapter)**
+13. [Client-side defensive result parsing](#listing-13--client-side-defensive-result-parsing)
+
+**News feed (if highlighted as a feature)**
+14. [Trending freshness selection](#listing-14--trending-freshness-selection)
 
 **Tier 3 — Optional supporting excerpts**
 7. [Input structure check (word-count based)](#listing-7--input-structure-check-word-count-based)
@@ -353,6 +365,211 @@ def _categorize(title: str, summary: str) -> str:
 ```
 
 *Caption: The topic classifier. Because the RSS data has no category field, each article is tagged by scoring its title and summary against per-topic keyword lists (English and Urdu) and choosing the highest-scoring topic, or "General" when none match. This powers the category filter pills on the All News screen.*
+
+---
+
+# Additional listings
+
+## Listing 9 — Bilingual language detection (Urdu script + Romanised)
+**Source:** `backend/python_code/services/urdu_bert.py` · `is_urdu()` (line 44)
+**Placement:** Tier 1 / Implementation chapter — a distinctive, Pakistan-specific feature.
+
+```python
+# Romanised-Urdu markers — how Pakistanis actually type on WhatsApp / social media
+_ROMAN_URDU_WORDS = {
+    "hai", "hain", "ka", "ki", "ke", "ko", "ne", "se", "mein", "par", "aur",
+    "nahi", "nahin", "yeh", "woh", "aap", "hum", "kya", "kyun", "kaise",
+    "sarkar", "hukumat", "awam", "masjid", "namaz", # … ~80 words total
+}
+
+def is_urdu(text: str) -> bool:
+    """True when the text is Urdu — either native script or Romanised."""
+    # Primary: any character in the Arabic/Urdu Unicode block (U+0600–U+06FF)
+    if bool(re.search(r'[؀-ۿ]', text or "")):
+        return True
+    # Secondary: 3+ known Romanised-Urdu words → route to the Urdu model
+    tokens = re.findall(r"[a-z]+", (text or "").lower())
+    hits = sum(1 for t in tokens if t in _ROMAN_URDU_WORDS)
+    return hits >= ROMAN_URDU_THRESHOLD
+```
+
+*Caption: Bilingual language detection. Urdu is detected two ways — by the presence of Arabic/Urdu-script characters, and by a word-list of common Romanised-Urdu terms (the way Urdu is typed in Latin letters on messaging apps). This routes each claim to the correct model (Urdu BERT vs English BERT) and disables NLI/LIME for script that the English pipeline cannot process.*
+
+**Report talking point:** most fake-news systems assume a single language; supporting *both* Urdu script and Romanised Urdu is a direct response to how misinformation actually circulates in Pakistan.
+
+---
+
+## Listing 10 — Parallel verification with graceful degradation
+**Source:** `backend/python_code/routes/verify.py` · `run_parallel_verification()` (line 31)
+**Placement:** Tier 2 / a *performance & reliability* subsection.
+
+```python
+def run_parallel_verification(text, hybrid_fn, nli_fn, db_search_fn=None):
+    """Run the hybrid and NLI branches in parallel. If either raises, capture
+    None for that side and flag the result as degraded, so the request still
+    returns a verdict instead of failing."""
+    def _safe(fn, *args):
+        try:
+            return fn(*args), None
+        except Exception as exc:
+            logger.exception("verification thread failed: %s", fn)
+            return None, exc
+
+    fut_hybrid = _executor.submit(_safe, hybrid_fn, text)          # thread A
+    fut_nli    = _executor.submit(_safe, nli_fn, text, db_search_fn) \
+                 if db_search_fn is not None else _executor.submit(_safe, nli_fn, text)
+
+    hybrid_res, hybrid_err = fut_hybrid.result()                   # thread B
+    nli_res,    nli_err    = fut_nli.result()
+    return {"hybrid": hybrid_res, "nli": nli_res,
+            "degraded": bool(hybrid_err) or bool(nli_err)}
+```
+
+*Caption: Parallel branch execution with graceful degradation. The evidence-search and NLI branches run concurrently on a shared thread pool, so wall-clock latency is max(t_hybrid, t_nli) rather than their sum. If one branch throws, its result is captured as None and the response is marked `degraded`, guaranteeing the user always gets a verdict.*
+
+**Report talking point:** this is a reliability decision — a single failing model must not take down the whole verification.
+
+---
+
+## Listing 11 — Fusing the BERT classifier
+**Source:** `backend/python_code/services/verification.py` · `_fuse_bert_with_hybrid()` (line 84, excerpted)
+**Placement:** Tier 2 / appendix — companion to Listing 2 (which fuses NLI).
+
+```python
+def _fuse_bert_with_hybrid(hybrid: dict, bert_res: dict) -> dict:
+    bert_label = (bert_res.get("label") or "").lower()
+    bert_confidence = float(bert_res.get("confidence") or 0.0)
+
+    # Never let BERT override an authoritative verdict (fact-check, GDELT, too-vague…)
+    if hybrid.get("verification_method") in _SKIP_METHODS or bert_label not in {"fake", "real"}:
+        return hybrid
+
+    final_label = (hybrid.get("final_label") or "").lower()
+
+    if final_label == "unverified":                     # no external evidence found
+        if bert_label == "fake" and bert_confidence >= BERT_SUSPECT_FAKE_THRESHOLD:   # ≥ 0.88
+            hybrid.update(final_label="fake", verification_method="bert_only",
+                          final_confidence=float(CONF_LOW))
+        elif bert_label == "real" and bert_confidence >= BERT_SUGGEST_REAL_THRESHOLD: # ≥ 0.90
+            hybrid.update(final_label="real", verification_method="bert_suggested_real",
+                          final_confidence=float(CONF_VERY_LOW))
+        return hybrid
+
+    if final_label == "real":                           # evidence says real
+        if bert_label == "fake" and bert_confidence >= BERT_DISAGREEMENT_THRESHOLD:   # ≥ 0.92
+            hybrid["model_disagreement"] = True          # flag, but keep the evidence verdict
+            hybrid["verification_method"] = "db_and_bert_conflict"
+        else:
+            hybrid["verification_method"] = "db_and_bert"
+    return hybrid
+```
+
+*Caption: Folding the BERT classifier into the verdict. BERT is treated as a secondary signal: it can promote an otherwise-unverified claim (its confidence sets a deliberately capped confidence), but it can only flag disagreement — never silently override — a verdict already backed by external evidence. Authoritative methods are skipped entirely.*
+
+**Report talking point:** the asymmetry (BERT decides only when there is no evidence, otherwise it just flags) prevents a black-box model from overturning transparent, source-backed verdicts.
+
+---
+
+## Listing 12 — LIME word-importance highlights
+**Source:** `backend/python_code/services/lime_explainer.py` · `get_fake_highlights()` (line 17)
+**Placement:** Explainable-AI section.
+
+```python
+# LIME on CPU is expensive (one BERT call per perturbation); 50–100 samples is a
+# stable trade-off for top-5 highlights. Overridable via LIME_NUM_SAMPLES.
+_NUM_SAMPLES = int(os.getenv("LIME_NUM_SAMPLES", "50"))
+explainer = LimeTextExplainer(class_names=['fake', 'real'])   # class 0 = fake
+
+def get_fake_highlights(text: str, predict_proba_fn, top_k: int = 5) -> list:
+    """Return the words that pushed the model towards a 'fake' verdict."""
+    try:
+        exp = explainer.explain_instance(
+            text, predict_proba_fn, labels=(0,),
+            num_features=top_k, num_samples=_NUM_SAMPLES)
+        # Keep only words with a positive weight on the 'fake' class
+        return [word for word, weight in exp.as_list(label=0) if weight > 0]
+    except Exception as e:
+        logger.warning("LIME explainer failed: %s", e)
+        return []
+```
+
+*Caption: LIME explainability for fake verdicts. LIME perturbs the input (masking random words), re-runs the classifier on each variant, and identifies which words most increased the "fake" probability. The top words are returned to the app and highlighted, so a verdict is accompanied by a human-readable reason rather than an opaque score. Run only for English fake verdicts.*
+
+**Report talking point:** this is your model-transparency contribution — the system shows *why* it flagged something, addressing the "black box" critique of ML classifiers.
+
+---
+
+## Listing 13 — Client-side defensive result parsing
+**Source:** `frontend/newstrustai/lib/screens/result/result_parser.dart`
+**Placement:** Frontend chapter.
+
+```dart
+// The backend can return fields in several shapes; normalise them into one
+// view model so the UI never has to special-case the response.
+
+double? _toDouble(dynamic v) => v == null
+    ? null
+    : (v is num ? v.toDouble() : double.tryParse(v.toString().trim()));
+
+double _normScore(dynamic raw) {                 // accept a 0–1 or a 0–100 score
+  final d = _toDouble(raw) ?? 0.0;
+  return d <= 1.0 ? d * 100.0 : d.clamp(0.0, 100.0);
+}
+
+// Verdict label may arrive as real / verified / true / fake / false / mixed.
+final bool isReal = label == "real" || label == "verified" || label == "true";
+final bool isFake = label == "fake" || label == "false";
+
+// Confidence is a 0–1 float on some backend paths; scale it to 0–100 so a
+// genuine 0.95 renders as "95%", not "1%".
+if (conf != null && conf <= 1.0) conf = conf * 100.0;
+```
+
+*Caption: Defensive parsing on the client. The API evolved to return confidences and scores on different scales (0–1 vs 0–100) and verdict labels under several names. The parser normalises all of these into a single view model, protecting the UI from inconsistent responses — for example scaling a 0–1 confidence to a percentage so a verified result is never mislabelled as low-confidence.*
+
+**Report talking point:** shows the frontend is robust to backend variation — a real defect (95% shown as 1%) was fixed here, which you can cite as an example of integration testing paying off.
+
+---
+
+## Listing 14 — Trending freshness selection
+**Source:** `backend/python_code/routes/trending.py` · `trending()`
+**Placement:** News-feed feature section.
+
+```python
+@router.get("/trending")
+def trending(request, limit: int = 10):
+    wanted = max(1, min(limit, 100))
+    items = [normalize_item(it) for it in safe_read_db() if isinstance(it, dict)]
+    items.sort(key=lambda x: _pub_dt(x) or _EPOCH, reverse=True)     # freshest first
+
+    # Prefer the last 3 days so renamed / dead feeds don't freeze the list;
+    # fall back to the freshest overall if too few recent articles exist.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    recent = [it for it in items if (_pub_dt(it) or _EPOCH) >= cutoff]
+    pool   = recent if len(recent) >= wanted else items
+
+    # Order sources by their freshest article (active feeds lead), then
+    # round-robin one-per-source for a list that is fresh AND diverse.
+    buckets = {}
+    for it in pool:
+        buckets.setdefault((it.get("source") or "Unknown").strip(), []).append(it)
+    sources = sorted(buckets, key=lambda s: _pub_dt(buckets[s][0]) or _EPOCH, reverse=True)
+
+    out = []
+    while len(out) < wanted and sources:
+        for src in list(sources):
+            if len(out) >= wanted: break
+            if buckets[src]: out.append(buckets[src].pop(0))
+            if not buckets[src]: sources.remove(src)
+
+    for it in out:                                # attach a derived topic category
+        it["category"] = _categorize(it.get("title", ""), it.get("summary", ""))
+    return {"items": out}
+```
+
+*Caption: The trending-feed selection algorithm. Articles are sorted newest-first, filtered to a recency window (so renamed or inactive feeds cannot dominate with stale items), then bucketed by source and round-robined — with sources ordered by their freshest article — to produce a list that is both current and diverse across outlets. Each returned item is tagged with a derived topic category.*
+
+**Report talking point:** a naive "latest N" feed froze on stale, renamed feeds; this recency-plus-diversity algorithm was the fix and demonstrates data-quality handling on a live, growing dataset.
 
 ---
 
