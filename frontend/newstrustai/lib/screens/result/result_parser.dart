@@ -125,6 +125,11 @@ ResultViewModel parseResultData(
     conf = conf ?? _toDouble(data["final_confidence"]) ?? _toDouble(data["confidence"]);
   }
 
+  // Backend sends confidence as a 0–1 float (e.g. 0.95 = 95%); scale to 0–100 for
+  // display, mirroring the bert_confidence handling below. Without this, a genuine
+  // 95% "Verified" result renders as "1% — Likely Fake/Unverified".
+  if (conf != null && conf <= 1.0) conf = conf * 100.0;
+
   final bool isReal = label == "real" || label == "verified" || label == "true";
   final bool isFake = label == "fake" || label == "false";
   final bool isMixed = label == "mixed";

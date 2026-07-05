@@ -31,6 +31,25 @@ String? extractNewsUrl(dynamic item) {
   return s;
 }
 
+// ─── HTML cleanup ────────────────────────────────────────────────────────────
+
+/// Strips HTML tags and decodes common entities from RSS summary/description
+/// text, so raw markup like `<img src="...">` never reaches the UI or the
+/// verification query.
+String stripHtml(String? input) {
+  if (input == null) return '';
+  var s = input.replaceAll(RegExp(r'<[^>]*>'), ' ');
+  s = s
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&apos;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>');
+  return s.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 // ─── Phone normalisation ─────────────────────────────────────────────────────
 
 /// Converts a Pakistani phone number to E.164 (+92...) format.

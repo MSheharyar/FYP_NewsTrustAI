@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../services/api_service.dart';
+import '../utils/app_utils.dart';
 import '../widgets/analysis_loading_overlay.dart';
 import 'result/result_screen.dart';
 
@@ -197,8 +198,8 @@ class _VerifyTextScreenState extends State<VerifyTextScreen> {
                     Column(
                       children: _trending.map((it) {
                         final text = (it is Map)
-                            ? ((it["summary"] ?? it["title"] ?? "").toString().trim())
-                            : it.toString().trim();
+                            ? stripHtml((it["summary"] ?? it["title"] ?? "").toString())
+                            : stripHtml(it.toString());
 
                         if (text.isEmpty) return const SizedBox.shrink();
 

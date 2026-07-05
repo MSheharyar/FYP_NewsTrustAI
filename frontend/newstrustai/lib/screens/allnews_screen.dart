@@ -103,8 +103,9 @@ class AllNewsScreen extends StatelessWidget {
         ? item
         : (item is Map ? Map<String, dynamic>.from(item) : <String, dynamic>{});
 
-    final String title = (m['title'] ?? "No Title").toString();
-    final String desc = (m['summary'] ?? "No summary available.").toString();
+    final String title = stripHtml(m['title']?.toString()).isEmpty ? "No Title" : stripHtml(m['title']?.toString());
+    final String descRaw = stripHtml(m['summary']?.toString());
+    final String desc = descRaw.isEmpty ? "No summary available." : descRaw;
     final String source = (m['source'] ?? "News Source").toString();
     final String? url = extractNewsUrl(m);
     final String? imageUrl = ApiService.resolveNewsImageUrl(m);
