@@ -20,8 +20,10 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.newstrustai"
+        // Must match the package_name in google-services.json and the Firebase
+        // Android app registration (com.example.fyp_proj) so Google Sign-In's
+        // package + SHA-1 validation succeeds. namespace stays as the code package.
+        applicationId = "com.example.fyp_proj"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
