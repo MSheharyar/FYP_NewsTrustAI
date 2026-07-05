@@ -36,7 +36,8 @@ class _VerifyTextScreenState extends State<VerifyTextScreen> {
     setState(() => _loadingTrending = true);
 
     try {
-      final List<dynamic> items = await ApiService.fetchQuickExamples();
+      final List<dynamic> items = await ApiService.fetchQuickExamples()
+          .timeout(const Duration(seconds: 20), onTimeout: () => []);
       if (!mounted) return;
       setState(() => _trending = items);
     } catch (_) {

@@ -49,18 +49,15 @@ class _HomeTabState extends State<HomeTab> {
     });
 
     try {
-      final items = await ApiService.fetchTrending();
+      final items = await ApiService.fetchTrending()
+          .timeout(const Duration(seconds: 20), onTimeout: () => []);
       if (!mounted) return;
-      setState(() {
-        _newsArticles = items;
-        _isLoading = false;
-      });
+      setState(() => _newsArticles = items);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _error = "Failed to load trending news.";
-      });
+      setState(() => _error = "Failed to load trending news.");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

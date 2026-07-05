@@ -16,7 +16,7 @@ class ApiService {
   // Defaults to the VPS backend; override for local dev:
   //   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000
   static final String _baseUrlOverride =
-      const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://187.127.124.132:8000').trim();
+      const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://commerce-retrace-coronary.ngrok-free.dev').trim();
 
   // Local Development — platform-aware localhost address
   // For physical Android device: replace 10.0.2.2 with your machine's LAN IP
@@ -45,6 +45,8 @@ class ApiService {
     final token = await user?.getIdToken();
     return {
       "Content-Type": "application/json",
+      // Bypass ngrok's free-tier browser interstitial so JSON is returned directly
+      "ngrok-skip-browser-warning": "true",
       if (token != null) "Authorization": "Bearer $token",
     };
   }
@@ -107,7 +109,8 @@ class ApiService {
 
   static Future<List<dynamic>> _getList(String path) async {
     try {
-      final headers = await _authHeaders();
+      final headers = await _authHeaders()
+          .timeout(const Duration(seconds: 10));
       final res = await http
           .get(Uri.parse("$_base$path"), headers: headers)
           .timeout(const Duration(seconds: 25));
