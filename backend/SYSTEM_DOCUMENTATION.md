@@ -24,6 +24,9 @@
 13. [Verdict States and Confidence Bands](#13-verdict-states-and-confidence-bands)
 14. [How to Run the System](#14-how-to-run-the-system)
 15. [All Optimizations Applied](#15-all-optimizations-applied)
+16. [Deployment & Hosting Architecture](#16-deployment--hosting-architecture)
+17. [Trending News & Category Classification](#17-trending-news--category-classification)
+18. [Change Log — Stabilization & Feature Session](#18-change-log--stabilization--feature-session)
 
 ---
 
@@ -124,7 +127,7 @@ backend/
 │   ├── routes/
 │   │   ├── verify.py              # POST /verify-text — main verification endpoint
 │   │   ├── links.py               # POST /verify-link — URL-based verification
-│   │   ├── trending.py            # GET /trending — trending news
+│   │   ├── trending.py            # GET /trending — fresh news feed + topic category classifier
 │   │   ├── debug.py               # Debug/admin endpoints
 │   │   └── chat.py                # POST /chat — Gemini AI chatbot
 │   ├── services/
@@ -139,7 +142,7 @@ backend/
 │   │   └── lime_explainer.py      # LIME word importance explainer
 │   └── utils/
 │       └── text.py                # clean_claim_text(), normalize_text()
-├── global_news_db.json            # Flat-file database of ~36,752 scraped news articles
+├── global_news_db.json            # Flat-file DB of scraped news (~38,800+ and growing)
 └── start_backend.ps1              # PowerShell startup script (sets REQUIRE_AUTH=false)
 ```
 
@@ -230,13 +233,14 @@ The final JSON response is returned to Flutter containing:
 
 The main verification function `hybrid_decision(text)` does:
 
-**Input vagueness check** (`_looks_unstructured`):
-- Text shorter than 35 characters → too vague
-- More than 18 non-alphanumeric characters → probably emoji/spam
-- No capitalized words AND no digits AND shorter than 120 chars → too vague
+**Input vagueness check** (`looks_unstructured`, in `text_verifier.py`):
+- Judged primarily by **word count**, not capitalisation. Counts "real" words (2+ letter tokens, Latin **or** Urdu/Arabic script).
+- Rejected only when: fewer than 4 words AND under `MIN_TEXT_LEN` chars; OR 2+ emoji; OR more than 18 non-standard symbols; OR (no capitals AND no digits AND fewer than 5 words AND under 60 chars).
+- **Why the rewrite:** the previous rule rejected *any* lowercase text under 120 chars, so normal news headlines (often 50–70 chars and/or lowercase) were bounced as `input_too_vague` before the database was even searched. Word-count is a far better "is this searchable" signal, and including the Urdu/Arabic range fixes short Urdu headlines that previously always failed.
 
 **BM25 candidate retrieval**:
 - Extracts 4+ letter keywords from the normalized claim using regex
+- Runs the DB search when the claim has **≥ 2 named entities OR ≥ 4 distinct content keywords**. spaCy NER misses many valid entities (lowercase player surnames, foreign/sports terms), so a keyword-rich headline that skipped the entity gate previously returned `no_evidence` even though the matching article was in the DB. `VERIFY_THRESHOLD` still gates the actual matches, so precision is unchanged.
 - Calls `get_candidate_articles(keywords, top_k=100)` which returns BM25-ranked articles
 - Falls back to full DB scan if no keywords found
 
@@ -368,7 +372,7 @@ Example: "PM Khan visited Beijing" matched with "PM Modi visited Beijing" → pe
 
 ### 6.10 `db/reader.py` — Database Reader with BM25
 
-- Reads `global_news_db.json` (36,752 articles)
+- Reads `global_news_db.json` (~38,800+ articles, auto-refreshed every 30 min from 26 RSS feeds, capped at 120,000)
 - **BM25 index**: built from `rank-bm25.BM25Okapi` on article title + summary tokens
 - `get_candidate_articles(keywords, top_k=100)` → BM25-ranked top results for given keywords
 - **Cache invalidation**: tracks file `mtime` (`os.path.getmtime`) and auto-reloads if DB file changes while server is live
@@ -379,7 +383,7 @@ Example: "PM Khan visited Beijing" matched with "PM Modi visited Beijing" → pe
 ## 7. The Database
 
 **File**: `backend/global_news_db.json`  
-**Size**: ~36,752 articles  
+**Size**: ~38,800+ articles and growing (a background fetcher pulls from **26 RSS feeds** every 30 minutes; the file is capped at 120,000 articles, oldest-first eviction)  
 **Format**: JSON array of article objects  
 
 Each article has:
@@ -407,7 +411,7 @@ The database is a flat JSON file — no SQL or NoSQL database server. It is load
 |--------|------|------|---------|
 | POST | `/verify-text` | Required | Main text verification endpoint |
 | POST | `/verify-link` | Required | URL-based news verification |
-| GET | `/trending` | Required | Trending news feed |
+| GET | `/trending?limit=N` | Required | Trending / all-news feed (freshest first, deduped by source). `limit` default 10, max 100. Each item carries a derived `category`. |
 | POST | `/chat` | Required | Gemini AI chatbot for news questions |
 | GET | `/debug/*` | Optional | Debug endpoints for development |
 
@@ -519,8 +523,8 @@ All config is in `config/settings.py`. Every value can be overridden via environ
 | Home | `screens/home/home_screen.dart` | Dashboard with quick actions |
 | Verify Text | Part of home | Input text to verify |
 | Verify Link | `screens/verify_link_screen.dart` | Enter news URL |
-| Result | `screens/result/result_screen.dart` | Full verification result display |
-| All News | `screens/allnews_screen.dart` | News feed |
+| Result | `screens/result/result_screen.dart` | Full verification result display + thumbs up/down feedback |
+| All News | `screens/allnews_screen.dart` | News feed with **topic-category filter pills** (All, Politics, Business, Sports, World, Technology, Entertainment, Health, General), pull-to-refresh, fetches 60 articles |
 | Analytics | `screens/analytics_screen.dart` | User verification history stats |
 | History | `screens/history_screen.dart` | Past verifications |
 | Chatbot | `screens/chatbot_screen.dart` | Gemini AI chat |
@@ -534,12 +538,14 @@ static Future<Map<String, String>> _authHeaders() async {
   final token = await user?.getIdToken();
   return {
     "Content-Type": "application/json",
+    // Bypass ngrok's free-tier browser interstitial so JSON is returned directly
+    "ngrok-skip-browser-warning": "true",
     if (token != null) "Authorization": "Bearer $token",
   };
 }
 ```
 
-Every `POST` and `GET` request uses `_authHeaders()` to attach the Firebase token.
+Every `POST` and `GET` request uses `_authHeaders()` to attach the Firebase token. The token fetch is also wrapped in its own timeout so a slow Firebase refresh cannot hang a request indefinitely.
 
 ---
 
@@ -665,6 +671,8 @@ Make sure `lib/services/api_service.dart` points to the correct backend URL (e.g
 - Set all API keys as environment variables
 - Run without `--reload` flag
 
+The live FYP deployment runs on a Hostinger VPS behind **nginx + an ngrok tunnel**, all as systemd services. See **[Section 16 — Deployment & Hosting Architecture](#16-deployment--hosting-architecture)** for the full network path and the reason a tunnel is used instead of the raw IP.
+
 ---
 
 ## 15. All Optimizations Applied
@@ -703,6 +711,99 @@ Over three development sessions, 25 improvements were made:
 | 28 | Main domain set precomputed | `services/verification.py` | frozenset built once at import, not per article |
 | 29 | Action guard changed to majority | `services/facts.py` | Require ≥ 50% group match, not all groups |
 | 30 | Mixed verdict state | `result_parser.dart` + `result_screen.dart` | Purple UI state for fact-checker disagreements |
+
+> A later stabilization & feature session added further fixes (deployment, verification-gate tuning, trending freshness, category pills, auth). These are documented in **[Section 18](#18-change-log--stabilization--feature-session)**.
+
+---
+
+## 16. Deployment & Hosting Architecture
+
+The backend runs on a **Hostinger KVM VPS** (Ubuntu 24.04, 1 vCPU, 4 GB RAM) and the Flutter app reaches it over the public internet. The network path is deliberately **outbound-only** because the hosting provider drops all *inbound* TCP to the VPS.
+
+```
+Flutter app (Pixel / device)
+      |  HTTPS
+      v
+https://<name>.ngrok-free.dev        ← stable public URL (ngrok edge)
+      |  (ngrok agent holds an OUTBOUND tunnel from the VPS)
+      v
+ngrok agent  ──►  nginx  :80  ──►  uvicorn  :8000  (FastAPI backend)
+                (reverse proxy)      (newstrustai.service, systemd)
+```
+
+**Why a tunnel instead of the raw IP?**
+During testing, all inbound TCP to the VPS's public IP started being dropped at the provider's network edge (confirmed with `tcpdump` showing **0** inbound SYN packets while the server itself was healthy — `nginx`/`uvicorn` bound to `0.0.0.0`, empty `iptables`, IP on `eth0`). No firewall/port change fixed it because the drop is upstream. The fix routes traffic through an **outbound** ngrok tunnel (outbound connections work fine), giving a stable public HTTPS URL that is independent of the provider's broken inbound path.
+
+**Components (all systemd services, auto-start on boot):**
+
+| Service | Role | Notes |
+|---------|------|-------|
+| `newstrustai.service` | uvicorn running `main:app` on `127.0.0.1:8000` | The FastAPI backend |
+| `nginx` | Reverse proxy `:80` → `127.0.0.1:8000` | Config in `/etc/nginx/sites-available/newstrustai` |
+| `ngrok.service` | Outbound tunnel: free static domain → `http://localhost:80` | Config `/etc/ngrok.yml`, binary `/usr/local/bin/ngrok` |
+
+**App-side configuration** (`lib/services/api_service.dart`):
+- Default backend URL is the ngrok domain, baked in via `String.fromEnvironment('API_BASE_URL', defaultValue: 'https://<name>.ngrok-free.dev')` — works in **both** debug and release builds.
+- All requests send an `ngrok-skip-browser-warning: true` header so ngrok returns the raw JSON instead of its free-tier interstitial page.
+- Override at build time with `flutter run --dart-define=API_BASE_URL=https://...`.
+
+**Deploying a backend change:** push to GitHub, then on the VPS:
+```bash
+cd /root/newstrustai/backend/python_code
+git pull origin main && systemctl restart newstrustai
+```
+
+---
+
+## 17. Trending News & Category Classification
+
+### 17.1 Freshness selection (`routes/trending.py`)
+
+`GET /trending?limit=N` builds the feed as follows:
+1. Read all articles, sort **freshest-first** by parsed `publishedAt` (falling back to `scrapedAt`; undated articles sink to the bottom).
+2. Keep only articles from the **last 3 days** (fall back to the freshest overall if fewer than `N` recent ones exist).
+3. Bucket by `source`, **order the sources by their freshest article** (not alphabetically), then round-robin one article per source for a list that is both fresh and diverse.
+
+**Why:** RSS feeds were renamed over time (e.g. `ARY` → `ARY News`, `ALJAZEERA` → `Al Jazeera`). The old names still held month-old articles in the DB, and the previous round-robin gave every source an equal slot **alphabetically**, so the dead old-named buckets always filled ~half the list with the same stale articles — the feed looked frozen even though the fetcher kept adding fresh news. Recency filtering + freshness-ordered sources make active feeds lead and dead feeds fall away.
+
+### 17.2 Topic category classifier
+
+The RSS data has **no category field**, so a topic is *derived* from each article's title + summary by `_categorize()`:
+- A keyword dictionary maps 7 topics — **Sports, Business, Technology, Entertainment, Health, Politics, World** — to keyword lists (English **and** a set of Urdu keywords). Stems are used so word variants match (`politic` → politics/political, `palestin` → palestine/palestinians), along with notable named entities (Trump, Biden, congress).
+- Each topic is scored by how many of its keywords appear in the text; the highest-scoring topic wins, else **General**.
+- Only the **final selected slice** (≤ `limit` articles) is classified — the whole DB is never scanned.
+- The chosen topic is attached as a `category` field on each returned article.
+
+**Accuracy note:** because categories are keyword-derived rather than model-predicted, expect roughly 85–90% correct on entity-rich English headlines; very short or Urdu-only headlines may land in **General**. This is an explicit trade-off of deriving categories from data that has none.
+
+### 17.3 Frontend (`screens/allnews_screen.dart`)
+
+A stateful screen that fetches 60 categorised articles (`ApiService.fetchNews(limit: 60)`), shows a horizontal row of **filter pills**, and filters the list to the selected topic. Includes a per-card category chip, pull-to-refresh, and a per-category empty state.
+
+---
+
+## 18. Change Log — Stabilization & Feature Session
+
+Fixes and features from the device-testing / stabilization session, in addition to the 30 optimizations in Section 15.
+
+| # | Area | What Changed | File(s) | Why |
+|---|------|-------------|---------|-----|
+| 31 | Hosting | Backend served via permanent **ngrok tunnel + nginx** reverse proxy as systemd services | VPS config, `api_service.dart` | Provider dropped all inbound TCP; outbound tunnel restores a stable public HTTPS URL (see Section 16) |
+| 32 | Result UI | **Confidence scaling fix** — `final_confidence` (0–1 float) scaled to 0–100 | `result_parser.dart` | A genuine 95% "Verified" result was rendering as "1% — Likely Fake/Unverified" |
+| 33 | Data cleanup | **`stripHtml()`** applied to RSS summaries and Verify-Text trending examples | `utils/app_utils.dart`, `allnews_screen.dart`, `verify_text_screen.dart` | Raw markup like `<img src=...>` was showing as literal text |
+| 34 | Verification | **`looks_unstructured` rewritten** to judge by word count (Latin/Urdu), not capital letters | `text_verifier.py` | Short/lowercase but complete headlines were rejected as `input_too_vague` before searching |
+| 35 | Verification | DB search now runs for **keyword-rich claims** (≥ 4 distinct keywords), not only ≥ 2 NER entities | `services/verification.py` | Real headlines returned `no_evidence` even though the article was in the DB |
+| 36 | Trending | Recency filter + **freshness-ordered** source round-robin | `routes/trending.py` | Renamed/dead feeds froze the feed with stale articles |
+| 37 | Trending | `?limit=` query param (default 10, max 100) | `routes/trending.py` | Lets the All News screen pull a fuller batch |
+| 38 | Feature | **Topic category classifier** + `category` field on each article | `routes/trending.py` | Powers the All News category pills (see Section 17) |
+| 39 | Feature | **Category filter pills** on the All News screen (stateful, pull-to-refresh) | `allnews_screen.dart`, `api_service.dart` | Browse news by topic |
+| 40 | Reliability | Trending loaders hardened with timeouts + `finally` guards; `_authHeaders()` bounded by its own timeout | `verify_text_screen.dart`, `home_tab.dart`, `api_service.dart` | A slow Firebase token refresh could leave the trending spinner stuck forever |
+| 41 | Auth | **Google Sign-In fixed**: removed the wrong `clientId` (Android reads it from `google-services.json`), added a cancelled-sign-in null guard | `services/auth_service.dart` | `clientId` was for web/iOS; it broke the Android flow |
+| 42 | Auth | **`applicationId` aligned** with the Firebase package (`com.example.fyp_proj`) and debug SHA-1/SHA-256 registered | `android/app/build.gradle.kts` + Firebase console | Package mismatch caused Google Sign-In `DEVELOPER_ERROR` |
+| 43 | UX | Facebook button now shows an informational message instead of attempting a broken login | `login_screen.dart` | Facebook app was not configured |
+| 44 | Feature | **Thumbs up/down feedback** on the result screen, saved to Firestore `users/{uid}/feedback` | `result_screen.dart`, `firestore_history_service.dart` | Collects user feedback for future active-learning |
+| 45 | News cards | Source-coloured gradient fallback header when an article has no image | `news_card.dart`, `allnews_screen.dart` | Most RSS items lack images; grey placeholder looked broken |
+| 46 | CI | Removed invalid `--cov-omit` pytest flag; widened `numpy` pin | `.github/workflows/backend-ci.yml`, `requirements.txt` | CI was failing on every run |
 
 ---
 
