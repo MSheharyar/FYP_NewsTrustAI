@@ -89,7 +89,15 @@ _EMOJI_RE = re.compile(
 
 def looks_unstructured(text: str) -> bool:
     text = normalize_spaces(text)
-    if len(text) < MIN_TEXT_LEN:
+
+    # Count "real" words (2+ letter tokens, Latin or Urdu/Arabic script). A claim
+    # with enough words is structured enough to search — regardless of capitalisation.
+    # News headlines are often short and/or lowercase; word count is a far better
+    # signal than capital letters for "is this searchable".
+    word_count = len(re.findall(r"[A-Za-z؀-ۿ]{2,}", text))
+
+    # Genuinely too short to search: very few words AND very short overall.
+    if word_count < 4 and len(text) < MIN_TEXT_LEN:
         return True
     # 2+ emoji characters → treat as spam/slang
     if len(_EMOJI_RE.findall(text)) >= 2:
@@ -98,10 +106,11 @@ def looks_unstructured(text: str) -> bool:
     non_alnum = sum(1 for c in text if not c.isalnum() and c not in " .,:;!?-'\"()")
     if non_alnum > 18:
         return True
-    # no capitalized tokens and no numbers → weak searchability
+    # Short fragment with no capitals AND no numbers AND few words → weak
+    # searchability. A normal lowercase headline (5+ words) still passes.
     has_caps = bool(re.search(r"\b[A-Z][a-z]{2,}\b", text))
     has_num = bool(re.search(r"\d", text))
-    if not has_caps and not has_num and len(text) < 120:
+    if not has_caps and not has_num and word_count < 5 and len(text) < 60:
         return True
     return False
 
