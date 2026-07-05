@@ -5,22 +5,20 @@ import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(clientId: '936316195806-vdut0mv024h4b1ci7ms2pd0psv41luoi.apps.googleusercontent.com');
+  // On Android, clientId must NOT be set — the package reads it from google-services.json
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   Future<User?> signInWithGoogle() async {
-    // 1. Trigger the Google Authentication flow
     final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) return null; // user cancelled
 
-    // 2. Obtain auth details from the request
-    final GoogleSignInAuthentication? googleAuth = await googleUser?.authentication;
+    final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
-    // 3. Create a new credential
     final credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth?.accessToken,
-      idToken: googleAuth?.idToken,
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
     );
 
-    // 4. Sign in to Firebase with the credential
     final UserCredential userCredential = await _auth.signInWithCredential(credential);
     return userCredential.user;
   }

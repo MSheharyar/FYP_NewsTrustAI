@@ -13,34 +13,41 @@ class AllNewsScreen extends StatelessWidget {
   // =========================
   // Image helpers
   // =========================
-  Widget _newsImage(String? url) {
+  Widget _newsImage(String? url, String source) {
     final u = (url ?? "").trim();
 
-    if (u.isEmpty) return _logoFallback();
+    if (u.isEmpty) return _logoFallback(source);
 
     return Image.network(
       u,
-      height: 180,
+      height: 120,
       width: double.infinity,
       fit: BoxFit.cover,
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
-        return _logoFallback();
+        return _logoFallback(source);
       },
-      errorBuilder: (_, __, ___) => _logoFallback(),
+      errorBuilder: (_, __, ___) => _logoFallback(source),
     );
   }
 
-  Widget _logoFallback() {
+  static Color _sourceColor(String source) {
+    const palette = [
+      Color(0xFF1565C0), Color(0xFF2E7D32), Color(0xFF6A1B9A),
+      Color(0xFFC62828), Color(0xFF00695C), Color(0xFF4527A0),
+      Color(0xFF283593), Color(0xFF558B2F),
+    ];
+    return palette[source.hashCode.abs() % palette.length];
+  }
+
+  Widget _logoFallback(String source) {
+    final color = _sourceColor(source);
     return Container(
-      height: 180,
+      height: 120,
       width: double.infinity,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Color(0xFFEAF2FF),
-            Color(0xFFF4F7FC),
-          ],
+          colors: [color, color.withValues(alpha: 0.7)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -49,20 +56,11 @@ class AllNewsScreen extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset(
-            "assets/images/logo.png",
-            width: 48, // ✅ small logo
-            height: 48,
-            fit: BoxFit.contain,
-          ),
+          const Icon(LucideIcons.newspaper, color: Colors.white, size: 30),
           const SizedBox(height: 6),
-          const Text(
-            "NewsTrust AI",
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.black54,
-            ),
+          Text(
+            source,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
           ),
         ],
       ),
@@ -130,9 +128,9 @@ class AllNewsScreen extends StatelessWidget {
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             child: SizedBox(
-              height: 180,
+              height: 120,
               width: double.infinity,
-              child: _newsImage(imageUrl),
+              child: _newsImage(imageUrl, source),
             ),
           ),
           Padding(

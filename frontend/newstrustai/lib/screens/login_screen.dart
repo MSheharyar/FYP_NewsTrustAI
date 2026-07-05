@@ -175,26 +175,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _handleFacebookSignIn() async {
-    setState(() => _isLoading = true);
-    try {
-      final user = await AuthService().signInWithFacebook();
-      if (user != null) await _ensureFirestoreDoc(user);
-      if (user != null && mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => HomeScreen(firstName: user.displayName ?? "User")),
-        );
-        showSnackBar("Facebook Login successful!", color: Colors.blue);
-      }
-    } catch (e) {
-      showSnackBar("Facebook Login failed or was canceled.", color: Colors.red);
-      debugPrint("Facebook Auth Error: $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
     try {
@@ -500,11 +480,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               const SizedBox(height: 10),
 
-                              // Facebook
+                              // Facebook — not available, show info
                               _socialButton(
-                                onTap: _handleFacebookSignIn,
+                                onTap: () => showSnackBar(
+                                  "Facebook login is not available. Please use email, OTP, or Google.",
+                                  color: const Color(0xFF1877F2),
+                                ),
                                 icon: FontAwesomeIcons.facebook,
-                                iconColor: const Color(0xFF1877F2),
+                                iconColor: Colors.grey.shade400,
                                 label: 'Continue with Facebook',
                               ),
                               const SizedBox(height: 24),
