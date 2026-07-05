@@ -317,10 +317,15 @@ def hybrid_decision(text: str, source_domain: str = ""):
 
     # Use the keyword index to pre-filter candidates instead of scanning the full DB
     claim_keywords = re.findall(r'\b[a-z]{4,}\b', claim.lower())
-    if _named_ent_count >= 2:
+    # Run the DB search when the claim has 2+ named entities OR enough distinct
+    # content keywords. spaCy NER misses many valid entities (lowercase names,
+    # sports/foreign terms), so a keyword-rich headline like "granollers zeballos
+    # retain french open doubles title" would otherwise skip the DB and miss an
+    # article that IS stored. VERIFY_THRESHOLD still guards against weak matches.
+    if _named_ent_count >= 2 or len(set(claim_keywords)) >= 4:
         candidates = get_candidate_articles(claim_keywords) if claim_keywords else safe_read_db()
     else:
-        candidates = []  # skip BM25 for low-entity claims; use fact-check fallback
+        candidates = []  # skip BM25 only for genuinely sparse, low-entity claims
 
     matches = []
     soft_candidates = []
