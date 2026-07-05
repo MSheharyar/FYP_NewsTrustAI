@@ -5,17 +5,62 @@ import '../services/api_service.dart';
 import '../utils/app_utils.dart';
 import 'verify_link_screen.dart';
 
-class AllNewsScreen extends StatelessWidget {
+class AllNewsScreen extends StatefulWidget {
   final List<dynamic> newsItems;
 
   const AllNewsScreen({super.key, required this.newsItems});
+
+  @override
+  State<AllNewsScreen> createState() => _AllNewsScreenState();
+}
+
+class _AllNewsScreenState extends State<AllNewsScreen> {
+  // Pills shown at the top. "All" first; the rest match backend categories.
+  static const List<String> _categories = [
+    "All", "Politics", "Business", "Sports", "World",
+    "Technology", "Entertainment", "Health", "General",
+  ];
+
+  String _selected = "All";
+  late List<dynamic> _items;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.newsItems; // show the passed-in list immediately
+    _fetchMore();
+  }
+
+  Future<void> _fetchMore() async {
+    try {
+      final more = await ApiService.fetchNews(limit: 60)
+          .timeout(const Duration(seconds: 20), onTimeout: () => []);
+      if (!mounted) return;
+      if (more.isNotEmpty) setState(() => _items = more);
+    } catch (_) {
+      // keep whatever we already have
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _catOf(dynamic it) {
+    final m = it is Map ? it : const {};
+    final c = (m['category'] ?? '').toString().trim();
+    return c.isEmpty ? 'General' : c;
+  }
+
+  List<dynamic> get _filtered {
+    if (_selected == "All") return _items;
+    return _items.where((it) => _catOf(it) == _selected).toList();
+  }
 
   // =========================
   // Image helpers
   // =========================
   Widget _newsImage(String? url, String source) {
     final u = (url ?? "").trim();
-
     if (u.isEmpty) return _logoFallback(source);
 
     return Image.network(
@@ -68,10 +113,38 @@ class AllNewsScreen extends StatelessWidget {
   }
 
   // =========================
+  // Category pills
+  // =========================
+  Widget _pill(String label) {
+    final bool sel = _selected == label;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: sel,
+        onSelected: (_) => setState(() => _selected = label),
+        showCheckmark: false,
+        selectedColor: const Color(0xFF1565C0),
+        backgroundColor: Colors.white,
+        labelStyle: TextStyle(
+          color: sel ? Colors.white : Colors.black87,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+        shape: StadiumBorder(
+          side: BorderSide(color: sel ? const Color(0xFF1565C0) : Colors.grey.shade300),
+        ),
+      ),
+    );
+  }
+
+  // =========================
   // UI
   // =========================
   @override
   Widget build(BuildContext context) {
+    final items = _filtered;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
@@ -86,15 +159,59 @@ class AllNewsScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: newsItems.isEmpty
-          ? const Center(child: Text("No news available"))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: newsItems.length,
-              itemBuilder: (context, index) {
-                return _buildNewsCard(context, newsItems[index]);
-              },
+      body: Column(
+        children: [
+          // ── Category pills ─────────────────────────────────────────────
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.only(bottom: 10, top: 4),
+            child: SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                children: _categories.map(_pill).toList(),
+              ),
             ),
+          ),
+
+          // ── News list ─────────────────────────────────────────────────
+          Expanded(
+            child: _loading && _items.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : items.isEmpty
+                    ? _emptyState()
+                    : RefreshIndicator(
+                        onRefresh: _fetchMore,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: items.length,
+                          itemBuilder: (context, index) =>
+                              _buildNewsCard(context, items[index]),
+                        ),
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return ListView(
+      // ListView so pull-to-refresh still works in the empty state
+      children: [
+        const SizedBox(height: 120),
+        Icon(LucideIcons.newspaper, size: 48, color: Colors.grey[400]),
+        const SizedBox(height: 12),
+        Center(
+          child: Text(
+            _selected == "All"
+                ? "No news available"
+                : "No $_selected news right now",
+            style: TextStyle(color: Colors.grey[600], fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
     );
   }
 
@@ -107,6 +224,7 @@ class AllNewsScreen extends StatelessWidget {
     final String descRaw = stripHtml(m['summary']?.toString());
     final String desc = descRaw.isEmpty ? "No summary available." : descRaw;
     final String source = (m['source'] ?? "News Source").toString();
+    final String category = _catOf(m);
     final String? url = extractNewsUrl(m);
     final String? imageUrl = ApiService.resolveNewsImageUrl(m);
 
@@ -139,23 +257,45 @@ class AllNewsScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Source
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    source,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.blue[700],
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                // Source + category chips
+                Row(
+                  children: [
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          source,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.blue[700],
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _sourceColor(category).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        category,
+                        style: TextStyle(
+                          color: _sourceColor(category),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
 

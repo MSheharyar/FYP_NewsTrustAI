@@ -20,6 +20,49 @@ def _parse_dt(s: str):
 def _pub_dt(it: dict):
     return _parse_dt(it.get("publishedAt")) or _parse_dt(it.get("scrapedAt"))
 
+
+# Keyword-based topic classifier. No category field exists in the RSS data, so
+# we derive one from the title + summary. Order matters for ties: the first
+# category to reach the top score wins, so more specific topics come first.
+_CATEGORY_KEYWORDS = {
+    "Sports": ["cricket", "football", "soccer", "tennis", "hockey", "olympic",
+               "match", "tournament", "league", "world cup", "goal", "wicket",
+               "batsman", "bowler", "fifa", "psl", "ipl", "final", "champion",
+               "score", "stadium", "athlete", "medal", "boxing", "series", "innings"],
+    "Business": ["economy", "economic", "market", "stock", "shares", "budget",
+                 "trade", "inflation", "rupee", "dollar", "bank", "investment",
+                 "gdp", "tax", "revenue", "profit", "export", "import", "business",
+                 "finance", "currency", "imf", "petrol price", "fuel price", "interest rate"],
+    "Entertainment": ["film", "movie", "cinema", "music", "song", "actor",
+                      "actress", "singer", "celebrity", "award", "bollywood",
+                      "hollywood", "drama", "concert", "box office", "showbiz",
+                      "netflix", "trailer"],
+    "Technology": ["technology", "software", "artificial intelligence", " ai ",
+                   "google", "apple", "microsoft", "meta", "smartphone", "iphone",
+                   "android", "chip", "semiconductor", "startup", "internet",
+                   "cyber", "robot", "gadget", "spacex", "nasa"],
+    "Health": ["health", "covid", "virus", "hospital", "disease", "vaccine",
+               "medical", "doctor", "patient", "cancer", "outbreak", "medicine",
+               "dengue", "polio", "mental health"],
+    "Politics": ["government", "minister", "election", "parliament", "senate",
+                 "assembly", "president", "prime minister", "cabinet", "opposition",
+                 "supreme court", "chief justice", "protest", "policy", "vote",
+                 "governor", "political", "pti", "pmln", "ppp"],
+    "World": ["united nations", "gaza", "israel", "palestine", "ukraine", "russia",
+              "china", "washington", "europe", " war", "military", "air strike",
+              "summit", "border", "refugee", "diplomat", "foreign", "nato"],
+}
+
+
+def _categorize(title: str, summary: str) -> str:
+    text = f"{title} {summary}".lower()
+    best_cat, best_score = "General", 0
+    for cat, kws in _CATEGORY_KEYWORDS.items():
+        score = sum(1 for kw in kws if kw in text)
+        if score > best_score:
+            best_cat, best_score = cat, score
+    return best_cat
+
 def _pick_first(it: dict, keys: list[str]) -> str:
     for k in keys:
         v = it.get(k)
@@ -61,7 +104,9 @@ router = APIRouter()
 
 @router.get("/trending")
 @limiter.limit("30/minute")
-def trending(request: Request):
+def trending(request: Request, limit: int = 10):
+    wanted = max(1, min(int(limit or 10), 100))
+
     items = safe_read_db()
     if not items:
         return {"items": []}
@@ -75,7 +120,7 @@ def trending(request: Request):
     # dominate the list; fall back to the freshest overall if too few recent ones.
     cutoff = datetime.now(timezone.utc) - timedelta(days=3)
     recent = [it for it in items if (_pub_dt(it) or _EPOCH) >= cutoff]
-    pool = recent if len(recent) >= 10 else items
+    pool = recent if len(recent) >= wanted else items
 
     # Bucket by source, then order sources by their freshest article so active
     # feeds lead. Round-robin one-per-source for a fresh AND diverse top list.
@@ -90,7 +135,6 @@ def trending(request: Request):
         reverse=True,
     )
 
-    wanted = 10
     out = []
     while len(out) < wanted and sources:
         for src in list(sources):
@@ -100,5 +144,10 @@ def trending(request: Request):
                 out.append(buckets[src].pop(0))
             if not buckets[src]:
                 sources.remove(src)
+
+    # Tag each returned article with a derived topic category (only the final
+    # slice, so we never classify the whole DB).
+    for it in out:
+        it["category"] = _categorize(it.get("title", ""), it.get("summary", ""))
 
     return {"items": out}

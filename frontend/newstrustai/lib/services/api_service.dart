@@ -154,6 +154,11 @@ class ApiService {
     return _getList("/trending");
   }
 
+  // Larger batch for the All News screen (each article carries a "category").
+  static Future<List<dynamic>> fetchNews({int limit = 60}) async {
+    return _getList("/trending?limit=$limit");
+  }
+
   static Future<List<dynamic>> fetchQuickExamples() async {
     final items = await fetchTrending();
     return items.take(5).toList();
