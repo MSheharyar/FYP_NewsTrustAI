@@ -34,9 +34,14 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Signing with the debug key — fine for sideloading / sharing (not Play Store).
             signingConfig = signingConfigs.getByName("debug")
+            // Disable R8 minification/shrinking: google_mlkit_text_recognition
+            // references optional CJK/Devanagari recognizers that aren't bundled,
+            // which makes R8 fail. Skipping shrinking avoids that and makes the
+            // release build behave like the (working) debug build.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
